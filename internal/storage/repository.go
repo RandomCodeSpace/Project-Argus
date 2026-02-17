@@ -46,6 +46,7 @@ func NewRepository() (*Repository, error) {
 		if dsn == "" {
 			dsn = "argus.db"
 		}
+		driver = "sqlite" // Explicitly set driver to sqlite
 		dialector = sqlite.Open(dsn)
 	}
 
@@ -70,7 +71,7 @@ func NewRepository() (*Repository, error) {
 	// If you need a fresh DB, manually drop the 'argus' database in MySQL.
 
 	// Disable FK checks during migration to prevent constraint errors with orphaned data
-	if driver == "mysql" || driver == "" {
+	if driver == "mysql" {
 		db.Exec("SET FOREIGN_KEY_CHECKS = 0")
 		log.Println("🔓 Disabled foreign key checks for migration")
 	}
@@ -81,7 +82,7 @@ func NewRepository() (*Repository, error) {
 	}
 
 	// Drop foreign keys that AutoMigrate may have created
-	if driver == "mysql" || driver == "" {
+	if driver == "mysql" {
 		db.Exec("ALTER TABLE spans DROP FOREIGN KEY fk_traces_spans")
 		db.Exec("ALTER TABLE logs DROP FOREIGN KEY fk_traces_logs")
 		db.Exec("SET FOREIGN_KEY_CHECKS = 1")

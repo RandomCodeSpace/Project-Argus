@@ -46,7 +46,7 @@ const AppLayout: React.FC = () => {
                 <div style={{ height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid #f0f0f0' }}>
                     {/* Logo Area */}
                     <Activity size={24} color="#1677ff" />
-                    {!collapsed && <span style={{ marginLeft: 8, fontWeight: 'bold', fontSize: 16 }}>PROJECT ARGUS</span>}
+                    {!collapsed && <span style={{ marginLeft: 8, fontWeight: 'bold', fontSize: 16 }}>Project Argus</span>}
                 </div>
                 <Menu
                     theme="light"
