@@ -22,12 +22,19 @@ type LatencyPoint struct {
 	Duration  int64     `json:"duration"` // Microseconds
 }
 
+// ServiceError represents error counts per service.
+type ServiceError struct {
+	ServiceName string `json:"service_name"`
+	ErrorCount  int64  `json:"error_count"`
+}
+
 // DashboardStats represents aggregated metrics for the dashboard.
 type DashboardStats struct {
-	TotalTraces    int64   `json:"total_traces"`
-	ErrorRate      float64 `json:"error_rate"`      // Percentage
-	ActiveServices int64   `json:"active_services"` // Count of unique services
-	P99Latency     int64   `json:"p99_latency"`     // Microseconds
+	TotalTraces        int64          `json:"total_traces"`
+	ErrorRate          float64        `json:"error_rate"`      // Percentage
+	ActiveServices     int64          `json:"active_services"` // Count of unique services
+	P99Latency         int64          `json:"p99_latency"`     // Microseconds
+	TopFailingServices []ServiceError `json:"top_failing_services"`
 }
 
 // LogFilter defines criteria for searching logs.
@@ -155,6 +162,21 @@ func (r *Repository) GetDashboardStats(start, end time.Time, serviceNames []stri
 			p99Index = 0
 		}
 		stats.P99Latency = durations[p99Index]
+	}
+
+	// 5. Top Failing Services
+	// We need a fresh session because previous ones might have modified the query scope implicitly if not careful,
+	// but here we use baseQuery.Session() which is safe.
+	// However, Group() and Order() might persist if applied to baseQuery directly.
+	// We use scoping carefully.
+	if err := baseQuery.Session(&gorm.Session{}).
+		Select("service_name, count(*) as error_count").
+		Where("status LIKE ?", "%STATUS_CODE_ERROR%").
+		Group("service_name").
+		Order("error_count DESC").
+		Limit(5).
+		Scan(&stats.TopFailingServices).Error; err != nil {
+		return nil, fmt.Errorf("failed to fetch top failing services: %w", err)
 	}
 
 	return &stats, nil

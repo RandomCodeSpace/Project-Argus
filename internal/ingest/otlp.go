@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/argus-project/argus/internal/storage"
+	"github.com/RandomCodeSpace/Project-Argus/internal/storage"
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"

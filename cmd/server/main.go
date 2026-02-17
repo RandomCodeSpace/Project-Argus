@@ -11,12 +11,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/argus-project/argus/internal/ai"
-	"github.com/argus-project/argus/internal/api"
-	"github.com/argus-project/argus/internal/config"
-	"github.com/argus-project/argus/internal/ingest"
-	"github.com/argus-project/argus/internal/storage"
-	"github.com/argus-project/argus/web"
+	"github.com/RandomCodeSpace/Project-Argus/internal/ai"
+	"github.com/RandomCodeSpace/Project-Argus/internal/api"
+	"github.com/RandomCodeSpace/Project-Argus/internal/config"
+	"github.com/RandomCodeSpace/Project-Argus/internal/ingest"
+	"github.com/RandomCodeSpace/Project-Argus/internal/storage"
+	"github.com/RandomCodeSpace/Project-Argus/web"
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"

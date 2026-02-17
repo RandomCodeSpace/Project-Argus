@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Row, Col, Card, Statistic, theme, Select, Button, Space } from 'antd';
+import { Row, Col, Card, Statistic, theme, Select, Button, Space, Skeleton, Empty } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import Highcharts from 'highcharts';
 import HighchartsReact from 'highcharts-react-official';
@@ -9,9 +9,14 @@ import "highcharts/modules/heatmap";
 // Ensure Highcharts is available globally for the heatmap module if needed
 if (typeof window !== 'undefined') {
     (window as any).Highcharts = Highcharts;
+    // Set Highcharts to use local timezone (offset in minutes from UTC)
+    const timezoneOffset = new Date().getTimezoneOffset();
+    Highcharts.setOptions({
+        time: {
+            timezoneOffset: timezoneOffset
+        }
+    });
 }
-
-
 
 // --- API Types ---
 interface DashboardStats {
@@ -19,6 +24,7 @@ interface DashboardStats {
     error_rate: number;
     active_services: number;
     p99_latency: number;
+    top_failing_services: { service_name: string; error_count: number }[];
 }
 
 interface TrafficPoint {
@@ -62,29 +68,52 @@ const fetchHeatmap = async (start?: string, end?: string, services?: string[]) =
     return res.json() as Promise<LatencyPoint[]>;
 };
 
+interface MetricCardProps {
+    title: string;
+    value?: number | string;
+    precision?: number;
+    suffix?: string;
+    color?: string;
+    loading: boolean;
+}
+
+const MetricCard: React.FC<MetricCardProps> = ({ title, value, precision, suffix, color, loading }) => (
+    <Card bordered={false}>
+        <Skeleton loading={loading} active paragraph={{ rows: 1 }}>
+            <Statistic
+                title={title}
+                value={value}
+                precision={precision}
+                suffix={suffix}
+                valueStyle={{ color }}
+            />
+        </Skeleton>
+    </Card>
+);
+
+
 interface DashboardProps {
     timeRange: [string, string] | null;
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ timeRange }) => {
     const { token } = theme.useToken();
-    // const [timeRange, setTimeRange] = useState<[string, string] | null>(null); // Removed local state
     const [selectedServices, setSelectedServices] = useState<string[]>(['order-service', 'payment-service']);
 
     // Queries
-    const { data: stats, refetch: refetchStats } = useQuery({
+    const { data: stats, refetch: refetchStats, isLoading: isLoadingStats } = useQuery({
         queryKey: ['dashboardStats', timeRange, selectedServices],
         queryFn: () => fetchDashboardStats(timeRange?.[0], timeRange?.[1], selectedServices),
         refetchInterval: 10000
     });
 
-    const { data: traffic, refetch: refetchTraffic } = useQuery({
+    const { data: traffic, refetch: refetchTraffic, isLoading: isLoadingTraffic } = useQuery({
         queryKey: ['traffic', timeRange, selectedServices],
         queryFn: () => fetchTraffic(timeRange?.[0], timeRange?.[1], selectedServices),
         refetchInterval: 10000
     });
 
-    const { data: heatmapData, refetch: refetchHeatmap } = useQuery({
+    const { data: heatmapData, refetch: refetchHeatmap, isLoading: isLoadingHeatmap } = useQuery({
         queryKey: ['heatmap', timeRange, selectedServices],
         queryFn: () => fetchHeatmap(timeRange?.[0], timeRange?.[1], selectedServices),
         refetchInterval: 10000
@@ -97,7 +126,7 @@ const Dashboard: React.FC<DashboardProps> = ({ timeRange }) => {
     };
 
     // Chart Options
-    const trafficOptions: Highcharts.Options = {
+    const trafficOptions: Highcharts.Options = useMemo(() => ({
         chart: { type: 'areaspline', height: 300, backgroundColor: 'transparent' },
         title: { text: undefined },
         xAxis: {
@@ -114,7 +143,7 @@ const Dashboard: React.FC<DashboardProps> = ({ timeRange }) => {
                         [1, 'rgba(255,255,255,0)']
                     ]
                 },
-                marker: { enabled: false },
+                marker: { enabled: true, radius: 3 },
                 lineWidth: 2,
                 color: token.colorPrimary
             }
@@ -125,11 +154,9 @@ const Dashboard: React.FC<DashboardProps> = ({ timeRange }) => {
             data: traffic?.map(p => [new Date(p.timestamp).getTime(), p.count]) || []
         }],
         credits: { enabled: false }
-    };
+    }), [traffic, token.colorPrimary]);
 
-    // Heatmap Options (Simplified Scatter for now as Heatmap module requires specific data structure)
-    // Actually, let's use a Scatter chart with color mapped to Y (Latency) to emulate a heatmap feel or just basic scatter
-    const heatmapOptions: Highcharts.Options = {
+    const heatmapOptions: Highcharts.Options = useMemo(() => ({
         chart: { type: 'scatter', height: 300, backgroundColor: 'transparent' },
         title: { text: undefined },
         xAxis: { type: 'datetime' },
@@ -153,7 +180,30 @@ const Dashboard: React.FC<DashboardProps> = ({ timeRange }) => {
             data: heatmapData?.map(p => [new Date(p.timestamp).getTime(), p.duration]) || []
         }],
         credits: { enabled: false }
-    };
+    }), [heatmapData]);
+
+    const serviceHealthOptions: Highcharts.Options = useMemo(() => ({
+        chart: { type: 'bar', height: 300, backgroundColor: 'transparent' },
+        title: { text: undefined },
+        xAxis: {
+            categories: stats?.top_failing_services?.map(s => s.service_name) || [],
+            title: { text: null }
+        },
+        yAxis: { min: 0, title: { text: 'Error Count', align: 'high' } },
+        plotOptions: {
+            bar: {
+                dataLabels: { enabled: true },
+                color: token.colorError
+            }
+        },
+        legend: { enabled: false },
+        series: [{
+            type: 'bar',
+            name: 'Errors',
+            data: stats?.top_failing_services?.map(s => s.error_count) || []
+        }],
+        credits: { enabled: false }
+    }), [stats?.top_failing_services, token.colorError]);
 
     return (
         <div>
@@ -174,8 +224,6 @@ const Dashboard: React.FC<DashboardProps> = ({ timeRange }) => {
                                     { value: 'payment-service', label: 'Payment Service' },
                                 ]}
                             />
-                            {/* RangePicker moved to Global Header */}
-                            {/* RangePicker moved to Global Header */}
                         </Space>
                     </Col>
                     <Col>
@@ -189,59 +237,63 @@ const Dashboard: React.FC<DashboardProps> = ({ timeRange }) => {
             {/* Metrics Cards */}
             <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
                 <Col xs={24} sm={6}>
-                    <Card bordered={false}>
-                        <Statistic
-                            title="Total Traces"
-                            value={stats?.total_traces || 0}
-                            valueStyle={{ color: token.colorPrimary }}
-                        />
-                    </Card>
+                    <MetricCard
+                        title="Total Traces"
+                        value={stats?.total_traces}
+                        color={token.colorPrimary}
+                        loading={isLoadingStats}
+                    />
                 </Col>
                 <Col xs={24} sm={6}>
-                    <Card bordered={false}>
-                        <Statistic
-                            title="Error Rate"
-                            value={stats?.error_rate || 0}
-                            precision={2}
-                            suffix="%"
-                            valueStyle={{ color: (stats?.error_rate || 0) > 1 ? token.colorError : token.colorSuccess }}
-                        />
-                    </Card>
+                    <MetricCard
+                        title="Error Rate"
+                        value={stats?.error_rate}
+                        precision={2}
+                        suffix="%"
+                        color={(stats?.error_rate || 0) > 1 ? token.colorError : token.colorSuccess}
+                        loading={isLoadingStats}
+                    />
                 </Col>
                 <Col xs={24} sm={6}>
-                    <Card bordered={false}>
-                        <Statistic
-                            title="P99 Latency"
-                            value={(stats?.p99_latency || 0) / 1000}
-                            precision={2}
-                            suffix="ms"
-                        />
-                    </Card>
+                    <MetricCard
+                        title="P99 Latency"
+                        value={(stats?.p99_latency || 0) / 1000}
+                        precision={2}
+                        suffix="ms"
+                        loading={isLoadingStats}
+                    />
                 </Col>
                 <Col xs={24} sm={6}>
-                    <Card bordered={false}>
-                        <Statistic
-                            title="Active Services"
-                            value={stats?.active_services || 0}
-                        />
-                    </Card>
+                    <MetricCard
+                        title="Active Services"
+                        value={stats?.active_services}
+                        loading={isLoadingStats}
+                    />
                 </Col>
             </Row>
 
             {/* Charts Row 1 */}
             <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
                 <Col xs={24} lg={16}>
-                    <Card title="Traffic Volume (Req/Sec)" bordered={false}>
-                        <HighchartsReact highcharts={Highcharts} options={trafficOptions} />
+                    <Card title="Traffic Volume (Req/Sec)" bordered={false} bodyStyle={{ minHeight: 350 }}>
+                        {isLoadingTraffic ? (
+                            <Skeleton active paragraph={{ rows: 6 }} />
+                        ) : (traffic?.length || 0) > 0 ? (
+                            <HighchartsReact highcharts={Highcharts} options={trafficOptions} />
+                        ) : (
+                            <Empty description="No Traffic Data" />
+                        )}
                     </Card>
                 </Col>
                 <Col xs={24} lg={8}>
-                    <Card title="Service Health" bordered={false} style={{ height: '100%' }}>
-                        {/* Placeholder for Top Failing Services or Health Status */}
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300, color: token.colorTextTertiary }}>
-                            Service Health Visualization
-                            <br />(Coming Soon)
-                        </div>
+                    <Card title="Top Failing Services" bordered={false} bodyStyle={{ minHeight: 350 }}>
+                        {isLoadingStats ? (
+                            <Skeleton active paragraph={{ rows: 6 }} />
+                        ) : (stats?.top_failing_services?.length || 0) > 0 ? (
+                            <HighchartsReact highcharts={Highcharts} options={serviceHealthOptions} />
+                        ) : (
+                            <Empty description="No Errors Found" />
+                        )}
                     </Card>
                 </Col>
             </Row>
@@ -249,8 +301,14 @@ const Dashboard: React.FC<DashboardProps> = ({ timeRange }) => {
             {/* Charts Row 2 */}
             <Row gutter={[16, 16]}>
                 <Col span={24}>
-                    <Card title="Latency Distribution (Heatmap)" bordered={false}>
-                        <HighchartsReact highcharts={Highcharts} options={heatmapOptions} />
+                    <Card title="Latency Distribution (Heatmap)" bordered={false} bodyStyle={{ minHeight: 350 }}>
+                        {isLoadingHeatmap ? (
+                            <Skeleton active paragraph={{ rows: 6 }} />
+                        ) : (heatmapData?.length || 0) > 0 ? (
+                            <HighchartsReact highcharts={Highcharts} options={heatmapOptions} />
+                        ) : (
+                            <Empty description="No Latency Data" />
+                        )}
                     </Card>
                 </Col>
             </Row>

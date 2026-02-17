@@ -1,9 +1,10 @@
-module github.com/argus-project/argus
+module github.com/RandomCodeSpace/Project-Argus
 
 go 1.25.6
 
 require (
 	github.com/glebarez/sqlite v1.11.0
+	github.com/joho/godotenv v1.5.1
 	github.com/tmc/langchaingo v0.1.14
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0
 	go.opentelemetry.io/otel v1.39.0
@@ -35,7 +36,6 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.2 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
-	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/microsoft/go-mssqldb v1.8.2 // indirect
 	github.com/pkoukk/tiktoken-go v0.1.6 // indirect
