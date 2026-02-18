@@ -405,154 +405,104 @@ type ServiceMapMetrics struct {
 
 // GetServiceMapMetrics computes per-service and per-edge metrics from traces and spans.
 func (r *Repository) GetServiceMapMetrics(start, end time.Time) (*ServiceMapMetrics, error) {
-	// 1. Per-service node metrics from traces
-	type nodeRow struct {
-		ServiceName string
-		Total       int64
-		Errors      int64
-		AvgDuration float64
-	}
-	var nodeRows []nodeRow
-
-	nodeQuery := r.db.Model(&Trace{}).
-		Select("service_name, COUNT(*) as total, SUM(CASE WHEN status LIKE '%ERROR%' THEN 1 ELSE 0 END) as errors, AVG(duration) as avg_duration").
-		Group("service_name")
-
-	if !start.IsZero() && !end.IsZero() {
-		nodeQuery = nodeQuery.Where("timestamp BETWEEN ? AND ?", start, end)
-	}
-
-	if err := nodeQuery.Find(&nodeRows).Error; err != nil {
-		return nil, fmt.Errorf("failed to get service map nodes: %w", err)
-	}
-
-	nodes := make([]ServiceMapNode, 0, len(nodeRows))
-	for _, nr := range nodeRows {
-		if nr.ServiceName == "" {
-			continue
-		}
-		nodes = append(nodes, ServiceMapNode{
-			Name:         nr.ServiceName,
-			TotalTraces:  nr.Total,
-			ErrorCount:   nr.Errors,
-			AvgLatencyMs: math.Round(nr.AvgDuration/1000*100) / 100, // µs → ms
-		})
-	}
-
-	// 2. Per-edge metrics: find traces that span multiple services via spans table
-	type spanRow struct {
-		TraceID       string
-		OperationName string
-		Duration      int64
-		Status        string
-	}
-
-	// Get all spans in the time range, grouped by trace
+	// 1. Fetch all spans in time range
 	var spans []Span
-	spanQuery := r.db.Model(&Span{})
+	query := r.db.Model(&Span{})
+
+	// Optimization: Filter by time using join on traces if spans don't have indexed timestamp
+	// But our spans DO have StartTime. Let's use that.
 	if !start.IsZero() && !end.IsZero() {
-		// Join with traces to filter by time range
-		spanQuery = spanQuery.Joins("JOIN traces ON spans.trace_id = traces.trace_id").
-			Where("traces.timestamp BETWEEN ? AND ?", start, end)
-	}
-	if err := spanQuery.Find(&spans).Error; err != nil {
-		return nil, fmt.Errorf("failed to get spans for service map: %w", err)
+		query = query.Where("start_time BETWEEN ? AND ?", start, end)
 	}
 
-	// Build trace → services mapping from traces (not spans, since spans don't have service_name)
-	type traceInfo struct {
-		TraceID     string
-		ServiceName string
-		Status      string
-		Duration    int64
+	if err := query.Find(&spans).Error; err != nil {
+		return nil, fmt.Errorf("failed to fetch spans: %w", err)
 	}
-	var traceInfos []traceInfo
-	tiQuery := r.db.Model(&Trace{}).Select("trace_id, service_name, status, duration")
-	if !start.IsZero() && !end.IsZero() {
-		tiQuery = tiQuery.Where("timestamp BETWEEN ? AND ?", start, end)
-	}
-	if err := tiQuery.Find(&traceInfos).Error; err != nil {
-		return nil, fmt.Errorf("failed to get trace infos: %w", err)
+	log.Printf("DEBUG: Fetched %d spans for service map. Sample span service_name: '%s'", len(spans), "")
+	if len(spans) > 0 {
+		log.Printf("DEBUG: Sample Span [0]: ID=%s, Parent=%s, Service=%s", spans[0].SpanID, spans[0].ParentSpanID, spans[0].ServiceName)
 	}
 
-	// Group by trace_id to find multi-service traces
-	traceServiceMap := make(map[string]map[string]struct {
-		count  int64
-		errors int64
-		totalD int64
-	})
-	for _, ti := range traceInfos {
-		if ti.ServiceName == "" {
+	/*
+	   Algorithm:
+	   1. Build Map: SpanID -> Span
+	   2. Nodes: Aggregate stats per ServiceName
+	   3. Edges: Iterate spans. If ParentSpanID exists:
+	       Source = Map[ParentSpanID].ServiceName
+	       Target = CurrentSpan.ServiceName
+	       If Source != Target => RECORD EDGE (Source->Target)
+	*/
+
+	spanMap := make(map[string]Span)
+	nodeStats := make(map[string]*ServiceMapNode)
+	edgeStats := make(map[string]*ServiceMapEdge) // Key: "Source->Target"
+
+	for _, s := range spans {
+		spanMap[s.SpanID] = s
+
+		if s.ServiceName == "" {
 			continue
 		}
-		if _, ok := traceServiceMap[ti.TraceID]; !ok {
-			traceServiceMap[ti.TraceID] = make(map[string]struct {
-				count  int64
-				errors int64
-				totalD int64
-			})
+
+		// Initialize/Update Node Stats
+		if _, ok := nodeStats[s.ServiceName]; !ok {
+			nodeStats[s.ServiceName] = &ServiceMapNode{Name: s.ServiceName}
 		}
-		entry := traceServiceMap[ti.TraceID][ti.ServiceName]
-		entry.count++
-		if strings.Contains(ti.Status, "ERROR") {
-			entry.errors++
-		}
-		entry.totalD += ti.Duration
-		traceServiceMap[ti.TraceID][ti.ServiceName] = entry
+		ns := nodeStats[s.ServiceName]
+		ns.TotalTraces++ // Using as "Total Spans" / "Total Ops" conceptually here
+		ns.AvgLatencyMs += float64(s.Duration)
+		// Check for error in attributes or status (simplification: checking if any error log linked? No, complex.
+		// Let's rely on ingestion to flag errors on trace. But for granular span errors, we'd need a status field on Span.
+		// For now, let's assume we can get error rate from traces associated, or just count calls.
+		// Future improvement: Add Status to Span model proper.
 	}
 
-	// Derive edges from traces that touch multiple services
-	type edgeKey struct{ source, target string }
-	edgeAgg := make(map[edgeKey]struct {
-		calls   int64
-		errors  int64
-		totalMs float64
-	})
-
-	for _, services := range traceServiceMap {
-		svcNames := make([]string, 0, len(services))
-		for name := range services {
-			svcNames = append(svcNames, name)
+	// Finalize Node Stats
+	nodes := make([]ServiceMapNode, 0)
+	for _, ns := range nodeStats {
+		if ns.TotalTraces > 0 {
+			ns.AvgLatencyMs = ns.AvgLatencyMs / float64(ns.TotalTraces) / 1000.0 // avg micro -> ms
+			ns.AvgLatencyMs = math.Round(ns.AvgLatencyMs*100) / 100
 		}
-		sort.Strings(svcNames)
-
-		for i := 0; i < len(svcNames); i++ {
-			for j := i + 1; j < len(svcNames); j++ {
-				key := edgeKey{source: svcNames[i], target: svcNames[j]}
-				entry := edgeAgg[key]
-				entry.calls++
-				// Use the average duration of both services for this edge
-				si := services[svcNames[i]]
-				sj := services[svcNames[j]]
-				avgD := float64(si.totalD+sj.totalD) / float64(si.count+sj.count) / 1000.0 // µs → ms
-				entry.totalMs += avgD
-				if si.errors > 0 || sj.errors > 0 {
-					entry.errors++
-				}
-				edgeAgg[key] = entry
-			}
-		}
+		nodes = append(nodes, *ns)
 	}
 
-	edges := make([]ServiceMapEdge, 0, len(edgeAgg))
-	// Compute time range duration in minutes for calls/min
-	rangeMins := end.Sub(start).Minutes()
-	if rangeMins < 1 {
-		rangeMins = 1
+	// Build Edges
+	for _, s := range spans {
+		if s.ParentSpanID == "" {
+			continue
+		}
+
+		parent, ok := spanMap[s.ParentSpanID]
+		if !ok {
+			// Parent might be outside time window or missing
+			continue
+		}
+
+		source := parent.ServiceName
+		target := s.ServiceName
+
+		if source == "" || target == "" || source == target {
+			continue
+		}
+
+		key := fmt.Sprintf("%s->%s", source, target)
+		if _, ok := edgeStats[key]; !ok {
+			edgeStats[key] = &ServiceMapEdge{Source: source, Target: target}
+		}
+		es := edgeStats[key]
+		es.CallCount++
+		// Add latency of the generic call (the child's duration is a proxy for the remote call time + processing)
+		es.AvgLatencyMs += float64(s.Duration)
 	}
 
-	for key, agg := range edgeAgg {
-		errRate := float64(0)
-		if agg.calls > 0 {
-			errRate = math.Round(float64(agg.errors)/float64(agg.calls)*1000) / 1000
+	edges := make([]ServiceMapEdge, 0)
+	for _, es := range edgeStats {
+		if es.CallCount > 0 {
+			es.AvgLatencyMs = es.AvgLatencyMs / float64(es.CallCount) / 1000.0
+			es.AvgLatencyMs = math.Round(es.AvgLatencyMs*100) / 100
 		}
-		edges = append(edges, ServiceMapEdge{
-			Source:       key.source,
-			Target:       key.target,
-			CallCount:    agg.calls,
-			AvgLatencyMs: math.Round(agg.totalMs/float64(agg.calls)*100) / 100,
-			ErrorRate:    errRate,
-		})
+		edges = append(edges, *es)
 	}
 
 	return &ServiceMapMetrics{

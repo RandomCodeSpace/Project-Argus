@@ -62,7 +62,7 @@ func main() {
 	slog.Info("📊 Internal telemetry initialized")
 
 	// 2. Initialize Storage
-	repo, err := storage.NewRepository()
+	repo, err := storage.NewRepository(metrics)
 	if err != nil {
 		log.Fatalf("Failed to initialize repository: %v", err)
 	}
@@ -104,8 +104,8 @@ func main() {
 	apiServer := api.NewServer(repo, hub, metrics)
 
 	// 7. Initialize OTLP Ingestion (gRPC)
-	traceServer := ingest.NewTraceServer(repo, cfg)
-	logsServer := ingest.NewLogsServer(repo, cfg)
+	traceServer := ingest.NewTraceServer(repo, metrics, cfg)
+	logsServer := ingest.NewLogsServer(repo, metrics, cfg)
 
 	// Wire up live log streaming + AI + DLQ metrics
 	logHandler := func(l storage.Log) {

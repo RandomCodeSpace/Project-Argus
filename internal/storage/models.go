@@ -33,8 +33,9 @@ type Span struct {
 	OperationName  string    `gorm:"size:255;index" json:"operation_name"`
 	StartTime      time.Time `json:"start_time"`
 	EndTime        time.Time `json:"end_time"`
-	Duration       int64     `json:"duration"`                         // Microseconds
-	AttributesJSON string    `gorm:"type:text" json:"attributes_json"` // Stored as JSON string
+	Duration       int64     `json:"duration"`                           // Microseconds
+	ServiceName    string    `gorm:"size:255;index" json:"service_name"` // Originating service
+	AttributesJSON string    `gorm:"type:text" json:"attributes_json"`   // Stored as JSON string
 }
 
 // Log represents a log entry associated with a trace.

@@ -10,6 +10,7 @@ import (
 
 	"github.com/RandomCodeSpace/Project-Argus/internal/config"
 	"github.com/RandomCodeSpace/Project-Argus/internal/storage"
+	"github.com/RandomCodeSpace/Project-Argus/internal/telemetry"
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
@@ -18,6 +19,7 @@ import (
 
 type TraceServer struct {
 	repo             *storage.Repository
+	metrics          *telemetry.Metrics
 	logCallback      func(storage.Log)
 	minSeverity      int
 	allowedServices  map[string]bool
@@ -27,6 +29,7 @@ type TraceServer struct {
 
 type LogsServer struct {
 	repo             *storage.Repository
+	metrics          *telemetry.Metrics
 	logCallback      func(storage.Log)
 	minSeverity      int
 	allowedServices  map[string]bool
@@ -34,9 +37,10 @@ type LogsServer struct {
 	collogspb.UnimplementedLogsServiceServer
 }
 
-func NewTraceServer(repo *storage.Repository, cfg *config.Config) *TraceServer {
+func NewTraceServer(repo *storage.Repository, metrics *telemetry.Metrics, cfg *config.Config) *TraceServer {
 	return &TraceServer{
 		repo:             repo,
+		metrics:          metrics,
 		minSeverity:      parseSeverity(cfg.IngestMinSeverity),
 		allowedServices:  parseServiceList(cfg.IngestAllowedServices),
 		excludedServices: parseServiceList(cfg.IngestExcludedServices),
@@ -48,9 +52,10 @@ func (s *TraceServer) SetLogCallback(cb func(storage.Log)) {
 	s.logCallback = cb
 }
 
-func NewLogsServer(repo *storage.Repository, cfg *config.Config) *LogsServer {
+func NewLogsServer(repo *storage.Repository, metrics *telemetry.Metrics, cfg *config.Config) *LogsServer {
 	return &LogsServer{
 		repo:             repo,
+		metrics:          metrics,
 		minSeverity:      parseSeverity(cfg.IngestMinSeverity),
 		allowedServices:  parseServiceList(cfg.IngestAllowedServices),
 		excludedServices: parseServiceList(cfg.IngestExcludedServices),
@@ -106,6 +111,7 @@ func (s *TraceServer) Export(ctx context.Context, req *coltracepb.ExportTraceSer
 					StartTime:      startTime,
 					EndTime:        endTime,
 					Duration:       duration,
+					ServiceName:    serviceName,
 					AttributesJSON: string(attrs),
 				}
 				spansToInsert = append(spansToInsert, sModel)
@@ -226,6 +232,9 @@ func (s *TraceServer) Export(ctx context.Context, req *coltracepb.ExportTraceSer
 			return nil, err
 		}
 		// slog.Debug("✅ Successfully persisted spans", "count", len(spansToInsert))
+		if s.metrics != nil {
+			s.metrics.RecordIngestion(len(spansToInsert))
+		}
 	}
 
 	return &coltracepb.ExportTraceServiceResponse{}, nil
@@ -304,6 +313,9 @@ func (s *LogsServer) Export(ctx context.Context, req *collogspb.ExportLogsServic
 			return nil, err
 		}
 		// slog.Debug("✅ Successfully persisted logs", "count", len(logsToInsert))
+		if s.metrics != nil {
+			s.metrics.RecordIngestion(len(logsToInsert))
+		}
 	}
 
 	// Notify listener

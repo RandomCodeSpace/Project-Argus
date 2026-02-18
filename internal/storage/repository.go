@@ -7,18 +7,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RandomCodeSpace/Project-Argus/internal/telemetry"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 // Repository wraps the GORM database handle for all data access operations.
 type Repository struct {
-	db     *gorm.DB
-	driver string
+	db      *gorm.DB
+	driver  string
+	metrics *telemetry.Metrics
 }
 
 // NewRepository initializes the database connection using environment variables and migrates the schema.
-func NewRepository() (*Repository, error) {
+func NewRepository(metrics *telemetry.Metrics) (*Repository, error) {
 	driver := os.Getenv("DB_DRIVER")
 	dsn := os.Getenv("DB_DSN")
 
@@ -36,7 +38,30 @@ func NewRepository() (*Repository, error) {
 		return nil, err
 	}
 
-	return &Repository{db: db, driver: driver}, nil
+	// Register GORM Callback for DB Latency Metrics
+	if metrics != nil {
+		db.Callback().Query().Before("gorm:query").Register("telemetry:before_query", func(d *gorm.DB) {
+			d.Set("telemetry:start_time", time.Now())
+		})
+		db.Callback().Query().After("gorm:query").Register("telemetry:after_query", func(d *gorm.DB) {
+			if start, ok := d.Get("telemetry:start_time"); ok {
+				duration := time.Since(start.(time.Time)).Seconds()
+				metrics.ObserveDBLatency(duration)
+			}
+		})
+		// Also measure Create/Update/Delete if desired, but Query is most frequent for "Latency"
+		db.Callback().Create().Before("gorm:create").Register("telemetry:before_create", func(d *gorm.DB) {
+			d.Set("telemetry:start_time", time.Now())
+		})
+		db.Callback().Create().After("gorm:create").Register("telemetry:after_create", func(d *gorm.DB) {
+			if start, ok := d.Get("telemetry:start_time"); ok {
+				duration := time.Since(start.(time.Time)).Seconds()
+				metrics.ObserveDBLatency(duration)
+			}
+		})
+	}
+
+	return &Repository{db: db, driver: driver, metrics: metrics}, nil
 }
 
 // BatchCreateSpans inserts multiple spans in batches.

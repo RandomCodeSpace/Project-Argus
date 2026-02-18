@@ -1,5 +1,10 @@
 # Project Argus
 
+[![Latest Release](https://img.shields.io/github/v/release/RandomCodeSpace/Project-Argus)](https://github.com/RandomCodeSpace/Project-Argus/releases)
+[![Security Audit](https://github.com/RandomCodeSpace/Project-Argus/actions/workflows/audit.yml/badge.svg)](https://github.com/RandomCodeSpace/Project-Argus/actions)
+![Go Version](https://img.shields.io/github/go-mod/go-version/RandomCodeSpace/Project-Argus)
+![React](https://img.shields.io/badge/frontend-React%20v18-61dafb?logo=react)
+
 Project Argus is an integrated observability and AI analysis platform.
 
 ## Getting Started
