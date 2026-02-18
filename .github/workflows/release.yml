@@ -30,6 +30,8 @@ jobs:
         run: |
           npm ci
           npm run build
+        env:
+          APP_VERSION: ${{ inputs.version }}
 
       - name: Check for dist directory
         run: |

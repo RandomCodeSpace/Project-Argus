@@ -418,9 +418,60 @@ func (r *Repository) GetServiceMapMetrics(start, end time.Time) (*ServiceMapMetr
 	if err := query.Find(&spans).Error; err != nil {
 		return nil, fmt.Errorf("failed to fetch spans: %w", err)
 	}
-	log.Printf("DEBUG: Fetched %d spans for service map. Sample span service_name: '%s'", len(spans), "")
-	if len(spans) > 0 {
-		log.Printf("DEBUG: Sample Span [0]: ID=%s, Parent=%s, Service=%s", spans[0].SpanID, spans[0].ParentSpanID, spans[0].ServiceName)
+
+	total := len(spans)
+	withParent := 0
+	for _, s := range spans {
+		if s.ParentSpanID != "" && s.ParentSpanID != "0000000000000000" {
+			withParent++
+		}
+	}
+	log.Printf("DEBUG: Fetched %d spans. Spans with non-zero parents: %d", total, withParent)
+	if total > 0 {
+		log.Printf("DEBUG: First 3 Spans: [0] ID=%s P=%s S=%s | [1] ID=%s P=%s S=%s | [2] ID=%s P=%s S=%s",
+			spans[0].SpanID, spans[0].ParentSpanID, spans[0].ServiceName,
+			func() string {
+				if total > 1 {
+					return spans[1].SpanID
+				} else {
+					return "-"
+				}
+			}(),
+			func() string {
+				if total > 1 {
+					return spans[1].ParentSpanID
+				} else {
+					return "-"
+				}
+			}(),
+			func() string {
+				if total > 1 {
+					return spans[1].ServiceName
+				} else {
+					return "-"
+				}
+			}(),
+			func() string {
+				if total > 2 {
+					return spans[2].SpanID
+				} else {
+					return "-"
+				}
+			}(),
+			func() string {
+				if total > 2 {
+					return spans[2].ParentSpanID
+				} else {
+					return "-"
+				}
+			}(),
+			func() string {
+				if total > 2 {
+					return spans[2].ServiceName
+				} else {
+					return "-"
+				}
+			}())
 	}
 
 	/*
@@ -469,7 +520,7 @@ func (r *Repository) GetServiceMapMetrics(start, end time.Time) (*ServiceMapMetr
 
 	// Build Edges
 	for _, s := range spans {
-		if s.ParentSpanID == "" {
+		if s.ParentSpanID == "" || s.ParentSpanID == "0000000000000000" {
 			continue
 		}
 

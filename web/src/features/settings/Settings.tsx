@@ -127,7 +127,7 @@ export function SettingsPage() {
                 <SimpleGrid cols={2}>
                     <Box>
                         <Text size="xs" c="dimmed" tt="uppercase" fw={600}>Version</Text>
-                        <Text size="sm">ARGUS V5.0 (DEV MODE)</Text>
+                        <Text size="sm">ARGUS {__APP_VERSION__} ({__APP_VERSION__ === 'DEV' ? 'DEV MODE' : 'PROD release'})</Text>
                     </Box>
                     <Box>
                         <Text size="xs" c="dimmed" tt="uppercase" fw={600}>Edition</Text>

@@ -60,7 +60,7 @@ export function AppLayout() {
                     <img src="/argus-logo.svg" alt="Argus Logo" style={{ width: 36, height: 36 }} />
                     <Box>
                         <Title order={4} c="white" style={{ letterSpacing: '0.05em' }}>ARGUS</Title>
-                        <Badge size="xs" variant="gradient" gradient={{ from: 'indigo', to: 'cyan' }}>V5.0</Badge>
+                        <Badge size="xs" variant="gradient" gradient={{ from: 'indigo', to: 'cyan' }}>{__APP_VERSION__}</Badge>
                     </Box>
                 </Group>
 
@@ -93,7 +93,7 @@ export function AppLayout() {
                 {/* Version Info at bottom */}
                 <Box mt="auto" pt="md" style={{ borderTop: '1px solid rgba(255,255,255,0.1)' }}>
                     <Text size="xs" c="dimmed" ta="center">Production Hardened Edition</Text>
-                    <Text size="xs" c="dimmed" ta="center">DEV MODE</Text>
+                    <Text size="xs" c="dimmed" ta="center">{__APP_VERSION__ === 'DEV' ? 'DEV MODE' : 'PROD MODE'}</Text>
                 </Box>
             </AppShell.Navbar>
 

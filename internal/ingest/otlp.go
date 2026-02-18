@@ -69,7 +69,7 @@ func (s *LogsServer) SetLogCallback(cb func(storage.Log)) {
 
 // Export handles incoming OTLP trace data.
 func (s *TraceServer) Export(ctx context.Context, req *coltracepb.ExportTraceServiceRequest) (*coltracepb.ExportTraceServiceResponse, error) {
-	// slog.Debug("📥 [TRACES] Received Request", "resource_spans", len(req.ResourceSpans))
+	slog.Info("📥 [TRACES] Received Request", "resource_spans", len(req.ResourceSpans))
 	var spansToInsert []storage.Span
 	var tracesToUpsert []storage.Trace
 
