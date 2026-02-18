@@ -1,7 +1,12 @@
 import { AppLayout } from './layouts/AppLayout'
+import { LiveModeProvider } from './contexts/LiveModeContext'
 
 function App() {
-  return <AppLayout />
+  return (
+    <LiveModeProvider>
+      <AppLayout />
+    </LiveModeProvider>
+  )
 }
 
 export default App

@@ -95,6 +95,10 @@ export interface DashboardStats {
     total_logs: number
     total_errors: number
     avg_latency_ms: number
+    error_rate: number
+    active_services: number
+    p99_latency: number
+    top_failing_services: ServiceError[]
 }
 
 export interface HealthStats {

@@ -14,17 +14,19 @@ import (
 
 // Server handles HTTP API requests.
 type Server struct {
-	repo    *storage.Repository
-	hub     *realtime.Hub
-	metrics *telemetry.Metrics
+	repo     *storage.Repository
+	hub      *realtime.Hub
+	eventHub *realtime.EventHub
+	metrics  *telemetry.Metrics
 }
 
 // NewServer creates a new API server.
-func NewServer(repo *storage.Repository, hub *realtime.Hub, metrics *telemetry.Metrics) *Server {
+func NewServer(repo *storage.Repository, hub *realtime.Hub, eventHub *realtime.EventHub, metrics *telemetry.Metrics) *Server {
 	return &Server{
-		repo:    repo,
-		hub:     hub,
-		metrics: metrics,
+		repo:     repo,
+		hub:      hub,
+		eventHub: eventHub,
+		metrics:  metrics,
 	}
 }
 
@@ -44,6 +46,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /metrics", telemetry.PrometheusHandler())
 	mux.HandleFunc("/ws", s.hub.HandleWebSocket)
 	mux.HandleFunc("/ws/health", s.metrics.HealthWSHandler())
+	mux.HandleFunc("/ws/events", s.eventHub.HandleWebSocket)
 	mux.HandleFunc("DELETE /api/admin/purge", s.handlePurge)
 	mux.HandleFunc("POST /api/admin/vacuum", s.handleVacuum)
 }

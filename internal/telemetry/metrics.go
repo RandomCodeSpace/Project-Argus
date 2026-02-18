@@ -60,6 +60,22 @@ func (m *Metrics) SetActiveConnections(n int) {
 	m.activeConns.Store(int64(n))
 }
 
+// IncrementActiveConns atomically adds 1 to the active connection count.
+func (m *Metrics) IncrementActiveConns() {
+	n := m.activeConns.Add(1)
+	m.ActiveConnections.Set(float64(n))
+}
+
+// DecrementActiveConns atomically subtracts 1 from the active connection count.
+func (m *Metrics) DecrementActiveConns() {
+	n := m.activeConns.Add(-1)
+	if n < 0 {
+		n = 0
+		m.activeConns.Store(0)
+	}
+	m.ActiveConnections.Set(float64(n))
+}
+
 // SetDLQSize updates the DLQ size gauge.
 func (m *Metrics) SetDLQSize(n int) {
 	m.DLQSize.Set(float64(n))

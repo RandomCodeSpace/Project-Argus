@@ -25,12 +25,25 @@ export function SettingsPage() {
     const [wsConnected, setWsConnected] = useState(false)
     const wsRef = useRef<WebSocket | null>(null)
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const mountedRef = useRef(true)
 
-    const connectWs = useCallback(() => {
-        // Cleanup any existing connection
+    const cleanup = useCallback(() => {
+        if (reconnectTimerRef.current) {
+            clearTimeout(reconnectTimerRef.current)
+            reconnectTimerRef.current = null
+        }
         if (wsRef.current) {
+            wsRef.current.onclose = null  // Prevent reconnect on intentional close
             wsRef.current.close()
             wsRef.current = null
+        }
+        setWsConnected(false)
+    }, [])
+
+    const connectWs = useCallback(() => {
+        // Guard: don't create duplicate connections
+        if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+            return
         }
 
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -53,8 +66,10 @@ export function SettingsPage() {
         ws.onclose = () => {
             setWsConnected(false)
             wsRef.current = null
-            // Auto-reconnect after 3 seconds
-            reconnectTimerRef.current = setTimeout(connectWs, 3000)
+            // Auto-reconnect only if component is still mounted
+            if (mountedRef.current) {
+                reconnectTimerRef.current = setTimeout(connectWs, 3000)
+            }
         }
 
         ws.onerror = () => {
@@ -65,18 +80,14 @@ export function SettingsPage() {
     }, [])
 
     useEffect(() => {
+        mountedRef.current = true
         connectWs()
 
         return () => {
-            if (reconnectTimerRef.current) {
-                clearTimeout(reconnectTimerRef.current)
-            }
-            if (wsRef.current) {
-                wsRef.current.close()
-                wsRef.current = null
-            }
+            mountedRef.current = false
+            cleanup()
         }
-    }, [connectWs])
+    }, [connectWs, cleanup])
 
     const handlePurge = async () => {
         setPurging(true)

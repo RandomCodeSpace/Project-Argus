@@ -24,6 +24,10 @@ func (m *Metrics) HealthWSHandler() http.HandlerFunc {
 		}
 		defer conn.Close(websocket.StatusNormalClosure, "closing")
 
+		// Track this connection in active_connections metric
+		m.IncrementActiveConns()
+		defer m.DecrementActiveConns()
+
 		slog.Info("📊 Health WS client connected")
 
 		// Send immediate snapshot so client doesn't wait for first tick

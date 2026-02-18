@@ -99,12 +99,23 @@ func main() {
 	defer hub.Stop()
 	slog.Info("🔌 WebSocket hub started")
 
+	// 4b. Initialize Event Notification Hub (for live mode — pushes data snapshots)
+	eventHub := realtime.NewEventHub(
+		repo,
+		metrics.IncrementActiveConns,
+		metrics.DecrementActiveConns,
+	)
+	ctxEvents, cancelEvents := context.WithCancel(context.Background())
+	defer cancelEvents()
+	go eventHub.Start(ctxEvents, 5*time.Second)
+	slog.Info("⚡ Event notification hub started (5s flush)")
+
 	// 5. Initialize AI Service
 	aiService := ai.NewService(repo)
 	defer aiService.Stop()
 
 	// 6. Initialize API Server
-	apiServer := api.NewServer(repo, hub, metrics)
+	apiServer := api.NewServer(repo, hub, eventHub, metrics)
 
 	// 7. Initialize OTLP Ingestion (gRPC)
 	traceServer := ingest.NewTraceServer(repo, metrics, cfg)
@@ -115,6 +126,7 @@ func main() {
 		start := time.Now()
 		apiServer.BroadcastLog(l)
 		aiService.EnqueueLog(l)
+		eventHub.NotifyRefresh()
 		if time.Since(start) > 100*time.Millisecond {
 			slog.Warn("Slow broadcast/enqueue", "duration", time.Since(start))
 		}

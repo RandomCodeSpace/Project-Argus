@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useMemo, useEffect } from 'react'
 import {
     Paper,
     Group,
@@ -26,6 +26,7 @@ import { Activity, AlertTriangle, Clock, Layers } from 'lucide-react'
 import type { TrafficPoint, ServiceError, DashboardStats } from '../../types'
 import { TimeRangeSelector, useTimeRange } from '../../components/TimeRangeSelector'
 import { useFilterParam } from '../../hooks/useFilterParams'
+import { useLiveMode } from '../../contexts/LiveModeContext'
 
 echarts.use([
     LineChart, BarChart, HeatmapChart,
@@ -36,6 +37,14 @@ echarts.use([
 export function Dashboard() {
     const tr = useTimeRange('15m')
     const [selectedService, setSelectedService] = useFilterParam('service', null)
+    const { isLive, isConnected, setServiceFilter } = useLiveMode()
+
+    // Sync local filter param to global live mode filter
+    useEffect(() => {
+        if (isLive) {
+            setServiceFilter(selectedService || '')
+        }
+    }, [isLive, selectedService, setServiceFilter])
 
     const { data: services } = useQuery<string[]>({
         queryKey: ['services'],
@@ -44,31 +53,25 @@ export function Dashboard() {
 
     const serviceParams = selectedService ? `&service_name=${encodeURIComponent(selectedService)}` : ''
 
+    // Traffic data
+    const trafficQueryKey = isLive ? ['live', 'traffic'] : ['traffic', tr.start, tr.end, selectedService]
     const { data: traffic } = useQuery<TrafficPoint[]>({
-        queryKey: ['traffic', tr.start, tr.end, selectedService],
+        queryKey: trafficQueryKey,
         queryFn: () => fetch(`/api/metrics/traffic?start=${tr.start}&end=${tr.end}${serviceParams}`).then(r => r.json()),
-        refetchInterval: 30000,
+        refetchInterval: isLive ? false : 30000,
+        enabled: !isLive || !!(isLive && trafficQueryKey[0] === 'live'),
     })
 
-    const { data: topFailing } = useQuery<ServiceError[]>({
-        queryKey: ['topFailing', tr.start, tr.end],
-        queryFn: () => fetch(`/api/metrics/dashboard?start=${tr.start}&end=${tr.end}`).then(r => r.json()),
-        refetchInterval: 30000,
-        select: (data: any) => data?.top_failing_services || [],
-    })
-
+    // Dashboard Stats (includes Top Failing Services)
+    const statsQueryKey = isLive ? ['live', 'dashboardStats'] : ['dashboardStats', tr.start, tr.end, selectedService]
     const { data: stats } = useQuery<DashboardStats>({
-        queryKey: ['dashboardStats', tr.start, tr.end, selectedService],
+        queryKey: statsQueryKey,
         queryFn: () => fetch(`/api/metrics/dashboard?start=${tr.start}&end=${tr.end}${serviceParams}`).then(r => r.json()),
-        refetchInterval: 30000,
+        refetchInterval: isLive ? false : 30000,
+        enabled: !isLive || !!(isLive && statsQueryKey[0] === 'live'),
     })
 
-    // Auto-refresh time range
-    const [, setTick] = useState(0)
-    useEffect(() => {
-        const interval = setInterval(() => setTick(t => t + 1), 30000)
-        return () => clearInterval(interval)
-    }, [])
+    const topFailing = stats?.top_failing_services || []
 
     const trafficChartOption = useMemo(() => ({
         tooltip: { trigger: 'axis' },
@@ -83,7 +86,7 @@ export function Dashboard() {
                 name: 'Total',
                 type: 'line',
                 smooth: true,
-                data: (traffic || []).map(p => [new Date(p.timestamp).getTime(), p.count]),
+                data: (traffic || []).map((p: TrafficPoint) => [new Date(p.timestamp).getTime(), p.count]),
                 areaStyle: { opacity: 0.1, color: '#4c6ef5' },
                 lineStyle: { color: '#4c6ef5', width: 2 },
                 itemStyle: { color: '#4c6ef5' },
@@ -92,7 +95,7 @@ export function Dashboard() {
                 name: 'Errors',
                 type: 'line',
                 smooth: true,
-                data: (traffic || []).map(p => [new Date(p.timestamp).getTime(), p.error_count]),
+                data: (traffic || []).map((p: TrafficPoint) => [new Date(p.timestamp).getTime(), p.error_count]),
                 areaStyle: { opacity: 0.1, color: '#fa5252' },
                 lineStyle: { color: '#fa5252', width: 2 },
                 itemStyle: { color: '#fa5252' },
@@ -106,11 +109,11 @@ export function Dashboard() {
         xAxis: { type: 'value', name: 'Error Rate %' },
         yAxis: {
             type: 'category',
-            data: (topFailing || []).map(s => s.service_name),
+            data: (topFailing || []).map((s: ServiceError) => s.service_name),
         },
         series: [{
             type: 'bar',
-            data: (topFailing || []).map(s => ({
+            data: (topFailing || []).map((s: ServiceError) => ({
                 value: +(s.error_rate * 100).toFixed(1),
                 itemStyle: { color: s.error_rate > 0.1 ? '#fa5252' : s.error_rate > 0.05 ? '#fd7e14' : '#40c057' },
             })),
@@ -128,9 +131,15 @@ export function Dashboard() {
 
     return (
         <Stack gap="md">
-            {/* Header */}
             <Group justify="space-between">
-                <Title order={3}>Dashboard</Title>
+                <Group gap="sm">
+                    <Title order={3}>Dashboard</Title>
+                    {isLive && (
+                        <Badge variant="dot" color={isConnected ? 'green' : 'red'} size="lg">
+                            {isConnected ? 'LIVE' : 'Reconnecting...'}
+                        </Badge>
+                    )}
+                </Group>
                 <Group gap="sm">
                     <Select
                         size="xs"
@@ -141,14 +150,12 @@ export function Dashboard() {
                         clearable
                         styles={{ input: { width: 180 } }}
                     />
-                    <TimeRangeSelector
-                        value={tr.timeRange}
-                        onChange={tr.setTimeRange}
-                    />
+                    {!isLive && (
+                        <TimeRangeSelector value={tr.timeRange} onChange={tr.setTimeRange} />
+                    )}
                 </Group>
             </Group>
 
-            {/* Stat Cards */}
             <SimpleGrid cols={{ base: 2, md: 4 }}>
                 {statCards.map((s) => (
                     <Paper key={s.label} shadow="xs" p="md" radius="md" withBorder>
@@ -165,7 +172,6 @@ export function Dashboard() {
                 ))}
             </SimpleGrid>
 
-            {/* Traffic Chart */}
             <Paper shadow="xs" p="md" radius="md" withBorder>
                 <Text fw={600} mb="sm">Traffic Over Time</Text>
                 <Box style={{ height: 300 }}>
@@ -173,7 +179,6 @@ export function Dashboard() {
                 </Box>
             </Paper>
 
-            {/* Top Failing Services */}
             <Paper shadow="xs" p="md" radius="md" withBorder>
                 <Group justify="space-between" mb="sm">
                     <Text fw={600}>Top Failing Services</Text>

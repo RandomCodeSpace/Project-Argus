@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
     Paper,
     Group,
@@ -18,6 +18,7 @@ import { Search, Clock } from 'lucide-react'
 import type { TraceResponse } from '../../types'
 import { TimeRangeSelector, useTimeRange } from '../../components/TimeRangeSelector'
 import { useFilterParam, useFilterParamString } from '../../hooks/useFilterParams'
+import { useLiveMode } from '../../contexts/LiveModeContext'
 
 const STATUS_COLORS: Record<string, string> = {
     OK: 'green',
@@ -29,19 +30,29 @@ export function TraceExplorer() {
     const [page, setPage] = useState(1)
     const [search, setSearch] = useFilterParamString('trace_q', '')
     const [selectedService, setSelectedService] = useFilterParam('service', null)
-    // Removed unused setPageParam as we use window.history for atomic updates
     const [expandedTraces, setExpandedTraces] = useState<Set<number>>(new Set())
 
     const pageSize = 25
     const tr = useTimeRange('5m')
+    const { isLive, isConnected, setServiceFilter } = useLiveMode()
+
+    // Sync local filter param to global live mode filter
+    useEffect(() => {
+        if (isLive) {
+            setServiceFilter(selectedService || '')
+        }
+    }, [isLive, selectedService, setServiceFilter])
 
     const { data: services } = useQuery<string[]>({
         queryKey: ['services'],
         queryFn: () => fetch('/api/metadata/services').then(r => r.json()),
     })
 
+    const tracesQueryKey = isLive ? ['live', 'traces'] : ['traces', page, search, selectedService, tr.start, tr.end]
+
+    // Traces data
     const { data, isLoading } = useQuery<TraceResponse>({
-        queryKey: ['traces', page, search, selectedService, tr.start, tr.end],
+        queryKey: tracesQueryKey,
         queryFn: () => {
             const params = new URLSearchParams()
             params.append('limit', String(pageSize))
@@ -52,7 +63,8 @@ export function TraceExplorer() {
             params.append('end', tr.end)
             return fetch(`/api/traces?${params}`).then(r => r.json())
         },
-        refetchInterval: 15000,
+        refetchInterval: isLive ? false : 15000,
+        enabled: !isLive || !!(isLive && tracesQueryKey[0] === 'live'),
     })
 
     const traces = data?.traces || []
@@ -67,18 +79,15 @@ export function TraceExplorer() {
 
     const navigateToLogs = (traceId: string, timestamp: string) => {
         const date = new Date(timestamp)
-        const start = new Date(date.getTime() - 60 * 60 * 1000).toISOString() // -1h (UTC)
-        const end = new Date(date.getTime() + 60 * 60 * 1000).toISOString()   // +1h (UTC)
+        const start = new Date(date.getTime() - 60 * 60 * 1000).toISOString()
+        const end = new Date(date.getTime() + 60 * 60 * 1000).toISOString()
 
-        // We need to update multiple params. Since useFilterParam updates individually,
-        // we can access the URLSearchParams directly or dispatch a batch update.
-        // For simplicity, we'll use URLSearchParams and window.history here to do it atomically.
         const params = new URLSearchParams(window.location.search)
         params.set('log_q', traceId)
         params.set('page', 'logs')
-        params.delete('range') // Explicitly remove range to force custom mode in useTimeRange
-        params.set('from', start) // Full ISO string (UTC)
-        params.set('to', end)     // Full ISO string (UTC)
+        params.delete('range')
+        params.set('from', start)
+        params.set('to', end)
 
         const url = `${window.location.pathname}?${params.toString()}`
         window.history.replaceState(null, '', url)
@@ -90,15 +99,19 @@ export function TraceExplorer() {
             <Group justify="space-between">
                 <Group gap="sm">
                     <Title order={3}>Traces</Title>
-                    <Badge variant="light" color="indigo">{data?.total ?? 0} total</Badge>
+                    {isLive ? (
+                        <Badge variant="dot" color={isConnected ? 'green' : 'red'} size="lg">
+                            {isConnected ? 'LIVE' : 'Reconnecting...'} • {data?.total ?? 0} total
+                        </Badge>
+                    ) : (
+                        <Badge variant="light" color="indigo">{data?.total ?? 0} total</Badge>
+                    )}
                 </Group>
-                <TimeRangeSelector
-                    value={tr.timeRange}
-                    onChange={tr.setTimeRange}
-                />
+                {!isLive && (
+                    <TimeRangeSelector value={tr.timeRange} onChange={tr.setTimeRange} />
+                )}
             </Group>
 
-            {/* Filters */}
             <Paper shadow="xs" p="sm" radius="md" withBorder>
                 <Group gap="sm">
                     <TextInput
@@ -121,7 +134,6 @@ export function TraceExplorer() {
                 </Group>
             </Paper>
 
-            {/* Trace Table */}
             <Paper shadow="xs" radius="md" withBorder>
                 <Table striped highlightOnHover>
                     <Table.Thead>
@@ -137,7 +149,7 @@ export function TraceExplorer() {
                         </Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>
-                        {isLoading ? (
+                        {isLoading && !isLive ? (
                             <Table.Tr>
                                 <Table.Td colSpan={8}>
                                     <Text c="dimmed" ta="center" py="md">Loading traces...</Text>
@@ -146,14 +158,14 @@ export function TraceExplorer() {
                         ) : traces.length === 0 ? (
                             <Table.Tr>
                                 <Table.Td colSpan={8}>
-                                    <Text c="dimmed" ta="center" py="md">No traces found</Text>
+                                    <Text c="dimmed" ta="center" py="md">{isLive ? 'Waiting for live data...' : 'No traces found'}</Text>
                                 </Table.Td>
                             </Table.Tr>
                         ) : traces.map((trace) => {
                             const isExpanded = expandedTraces.has(trace.id)
                             return (
-                                <>
-                                    <Table.Tr key={trace.id}>
+                                <React.Fragment key={trace.id}>
+                                    <Table.Tr>
                                         <Table.Td style={{ cursor: 'pointer' }} onClick={() => toggleTrace(trace.id)}>
                                             <Text size="xs" c="dimmed">{isExpanded ? '▼' : '▶'}</Text>
                                         </Table.Td>
@@ -230,7 +242,7 @@ export function TraceExplorer() {
                                             </Table.Td>
                                         </Table.Tr>
                                     )}
-                                </>
+                                </React.Fragment>
                             )
                         })}
                     </Table.Tbody>
@@ -247,4 +259,3 @@ export function TraceExplorer() {
         </Stack>
     )
 }
-
