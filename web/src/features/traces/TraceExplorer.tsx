@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useRef } from 'react'
 import {
     Paper,
     Group,
@@ -40,7 +40,8 @@ const columnHelper = createColumnHelper<Trace>()
 export function TraceExplorer() {
     const { ref: containerRef, height: containerHeight } = useElementSize()
     const [pageSize, setPageSize] = useState(25)
-    const [debouncedPageSize] = useDebouncedValue(pageSize, 300)
+    const [debouncedPageSize] = useDebouncedValue(pageSize, 1000)
+    const lastHeightRef = useRef(0)
 
     const [page, setPage] = useState(1)
     const [search, setSearch] = useFilterParamString('trace_q', '')
@@ -50,14 +51,19 @@ export function TraceExplorer() {
     const tr = useTimeRange('5m')
     const { isLive, isConnected, setServiceFilter } = useLiveMode()
 
-    // Calculate dynamic page size based on available height
+    // Calculate dynamic page size based on available height (Stabilized)
     useEffect(() => {
         if (containerHeight > 0) {
-            const headerHeight = 40
-            const rowHeight = 40
-            const calculatedSize = Math.max(10, Math.floor((containerHeight - headerHeight) / rowHeight))
-            if (calculatedSize !== pageSize) {
-                setPageSize(calculatedSize)
+            // Only recalculate if height changed significantly (> 20px)
+            // This prevents sub-pixel jitter or LoadingOverlay shifts from triggering a loop
+            if (Math.abs(containerHeight - lastHeightRef.current) > 20) {
+                const headerHeight = 40
+                const rowHeight = 40
+                const calculatedSize = Math.max(10, Math.floor((containerHeight - headerHeight) / rowHeight))
+                if (calculatedSize !== pageSize) {
+                    setPageSize(calculatedSize)
+                    lastHeightRef.current = containerHeight
+                }
             }
         }
     }, [containerHeight, pageSize])
@@ -89,8 +95,9 @@ export function TraceExplorer() {
             params.append('end', tr.end)
             return fetch(`/api/traces?${params}`).then(r => r.json())
         },
-        refetchInterval: isLive ? false : 15000,
         enabled: !isLive,
+        staleTime: 30000, // Keep data fresh for 30s
+        refetchOnWindowFocus: false, // Core requirement: No background noise
     })
 
     const traces = data?.traces || []
@@ -200,7 +207,7 @@ export function TraceExplorer() {
     })
 
     return (
-        <Stack gap="md" style={{ height: '100%' }}>
+        <Stack gap="md" style={{ height: '100%', overflow: 'hidden' }}>
             <Group justify="space-between">
                 <Group gap="sm">
                     <Title order={3}>Traces</Title>
@@ -237,10 +244,10 @@ export function TraceExplorer() {
                 </Group>
             </Paper>
 
-            <Paper shadow="xs" radius="md" withBorder style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+            <Paper shadow="xs" radius="md" withBorder style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
                 <LoadingOverlay visible={isFetching && !isLive} zIndex={1000} overlayProps={{ radius: 'sm', blur: 2 }} />
 
-                <Box ref={containerRef} style={{ flex: 1, overflow: 'auto' }}>
+                <Box ref={containerRef} style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
                     <Table striped highlightOnHover>
                         <Table.Thead>
                             {table.getHeaderGroups().map(headerGroup => (
@@ -324,13 +331,14 @@ export function TraceExplorer() {
                     </Table>
                 </Box>
 
-                {totalPages > 1 && (
-                    <Box p="md" style={{ borderTop: '1px solid var(--argus-border)' }}>
-                        <Group justify="center">
+                {/* Footer - Fixed height to keep layout stable during pagination toggles */}
+                <Box p="xs" style={{ borderTop: '1px solid var(--mantine-color-gray-2)', height: 48, display: 'flex', alignItems: 'center' }}>
+                    {totalPages > 1 && (
+                        <Group justify="center" style={{ flex: 1 }}>
                             <Pagination total={totalPages} value={page} onChange={setPage} size="sm" />
                         </Group>
-                    </Box>
-                )}
+                    )}
+                </Box>
             </Paper>
         </Stack>
     )

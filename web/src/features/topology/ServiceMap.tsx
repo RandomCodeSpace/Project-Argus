@@ -104,8 +104,9 @@ export function ServiceMap() {
             const res = await fetch(`/api/metrics/service-map?start=${tr.start}&end=${tr.end}`)
             return res.json()
         },
-        refetchInterval: isLive ? false : 10000,
         enabled: !isLive,
+        staleTime: 30000,
+        refetchOnWindowFocus: false,
     })
 
     const [nodes, setNodes, onNodesChange] = useNodesState([])

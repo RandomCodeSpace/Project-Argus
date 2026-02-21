@@ -60,8 +60,9 @@ export function Dashboard() {
     const { data: traffic, isFetching: isFetchingTraffic } = useQuery<TrafficPoint[]>({
         queryKey: trafficQueryKey,
         queryFn: () => fetch(`/api/metrics/traffic?start=${tr.start}&end=${tr.end}${serviceParams}`).then(r => r.json()),
-        refetchInterval: isLive ? false : 30000,
         enabled: !isLive,
+        staleTime: 30000,
+        refetchOnWindowFocus: false,
     })
 
     // Dashboard Stats (includes Top Failing Services)
@@ -69,8 +70,9 @@ export function Dashboard() {
     const { data: stats, isFetching: isFetchingStats } = useQuery<DashboardStats>({
         queryKey: statsQueryKey,
         queryFn: () => fetch(`/api/metrics/dashboard?start=${tr.start}&end=${tr.end}${serviceParams}`).then(r => r.json()),
-        refetchInterval: isLive ? false : 30000,
         enabled: !isLive,
+        staleTime: 30000,
+        refetchOnWindowFocus: false,
     })
 
     const topFailing = stats?.top_failing_services || []

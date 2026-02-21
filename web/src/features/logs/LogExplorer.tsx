@@ -57,8 +57,9 @@ export function LogExplorer() {
     // 1. Viewport & Sizing (Stabilized)
     const { ref: containerRef, height: containerHeight } = useElementSize()
     const [pageSize, setPageSize] = useState(25)
-    // Debounce resize updates to 500ms to prevent jitter and excessive re-fetching
-    const [debouncedPageSize] = useDebouncedValue(pageSize, 500)
+    // Debounce resize updates to 1000ms to prevent jitter and excessive re-fetching
+    const [debouncedPageSize] = useDebouncedValue(pageSize, 1000)
+    const lastHeightRef = useRef(0)
 
     const [page, setPage] = useState(1)
     const [selectedService, setSelectedService] = useFilterParam('service', null)
@@ -81,12 +82,16 @@ export function LogExplorer() {
     // Stabilized dynamic page size calculation
     useEffect(() => {
         if (containerHeight > 0) {
-            const headerHeight = 40
-            const rowHeight = 42
-            // Use Math.max/min to keep paging within sane bounds
-            const calculatedSize = Math.max(10, Math.floor((containerHeight - headerHeight) / rowHeight))
-            if (calculatedSize !== pageSize) {
-                setPageSize(calculatedSize)
+            // Only recalculate if height changed significantly (> 20px)
+            if (Math.abs(containerHeight - lastHeightRef.current) > 20) {
+                const headerHeight = 40
+                const rowHeight = 42
+                // Use Math.max/min to keep paging within sane bounds
+                const calculatedSize = Math.max(10, Math.floor((containerHeight - headerHeight) / rowHeight))
+                if (calculatedSize !== pageSize) {
+                    setPageSize(calculatedSize)
+                    lastHeightRef.current = containerHeight
+                }
             }
         }
     }, [containerHeight, pageSize])
@@ -115,7 +120,7 @@ export function LogExplorer() {
             return res.json()
         },
         enabled: !liveMode,
-        staleTime: 5000,
+        staleTime: 30000,
         refetchOnWindowFocus: false,
     })
 
@@ -288,7 +293,7 @@ export function LogExplorer() {
     }
 
     return (
-        <Stack gap="md" style={{ height: '100%' }}>
+        <Stack gap="md" style={{ height: '100%', overflow: 'hidden' }}>
             {/* Page Header */}
             <Group justify="space-between" px="xs">
                 <Group gap="sm">
@@ -387,7 +392,8 @@ export function LogExplorer() {
                     style={{
                         flex: 1,
                         overflow: 'auto',
-                        position: 'relative'
+                        position: 'relative',
+                        minHeight: 0
                     }}
                 >
                     <div style={{ height: `${virtualizer.getTotalSize()}px`, width: '100%', position: 'relative' }}>
@@ -520,16 +526,16 @@ export function LogExplorer() {
                     </div>
                 </div>
 
-                {/* Unified Footer */}
-                <Box p="xs" bg="var(--mantine-color-gray-0)" style={{ borderTop: '1px solid var(--mantine-color-gray-2)' }}>
+                {/* Unified Footer - Locked height for stability */}
+                <Box p="xs" bg="var(--mantine-color-gray-0)" style={{ borderTop: '1px solid var(--mantine-color-gray-2)', height: 48, display: 'flex', alignItems: 'center' }}>
                     {liveMode ? (
-                        <Group justify="space-between" px="md">
+                        <Group justify="space-between" px="md" style={{ flex: 1 }}>
                             <Text size="xs" fw={500} c="dimmed">Live Buffer: {liveLogs.length}/2000 logs</Text>
                             <Badge variant="dot" color="green" size="sm">RECEIVING DATA</Badge>
                         </Group>
                     ) : (
                         totalPages > 1 && (
-                            <Group justify="center">
+                            <Group justify="center" style={{ flex: 1 }}>
                                 <Pagination total={totalPages} value={page} onChange={setPage} size="sm" />
                             </Group>
                         )

@@ -1,5 +1,5 @@
-import { Group, Switch, Text, Badge } from '@mantine/core'
-import { Play, Pause } from 'lucide-react'
+import { Group, Switch, Text, Badge, ActionIcon, Tooltip } from '@mantine/core'
+import { Play, Pause, RefreshCw } from 'lucide-react'
 import { useLiveMode } from '../contexts/LiveModeContext'
 import { TimeRangeSelector, useTimeRange } from './TimeRangeSelector'
 
@@ -31,10 +31,22 @@ export function GlobalControls() {
                 size="md"
             />
             {!isLive && (
-                <TimeRangeSelector
-                    value={tr.timeRange}
-                    onChange={tr.setTimeRange}
-                />
+                <Group gap="xs">
+                    <TimeRangeSelector
+                        value={tr.timeRange}
+                        onChange={tr.setTimeRange}
+                    />
+                    <Tooltip label="Refresh data">
+                        <ActionIcon
+                            variant="light"
+                            size="md"
+                            onClick={tr.refresh}
+                            aria-label="Refresh"
+                        >
+                            <RefreshCw size={16} />
+                        </ActionIcon>
+                    </Tooltip>
+                </Group>
             )}
         </Group>
     )
