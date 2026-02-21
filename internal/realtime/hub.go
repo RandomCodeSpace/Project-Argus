@@ -64,6 +64,9 @@ type Hub struct {
 	// onConnectionChange is called when the number of active connections changes.
 	// Used to update Prometheus gauge.
 	onConnectionChange func(count int)
+
+	logPool    sync.Pool
+	metricPool sync.Pool
 }
 
 // client represents a single WebSocket connection.
@@ -74,19 +77,29 @@ type client struct {
 
 // NewHub creates a new buffered WebSocket hub.
 func NewHub(onConnectionChange func(count int)) *Hub {
-	return &Hub{
+	h := &Hub{
 		clients:            make(map[*client]struct{}),
 		register:           make(chan *client),
 		unregister:         make(chan *client),
 		broadcast:          make(chan LogEntry, 5000),
 		metricsCh:          make(chan MetricEntry, 5000),
-		logBuffer:          make([]LogEntry, 0, 100),
-		metricBuffer:       make([]MetricEntry, 0, 100),
 		maxBufferSize:      100,
 		flushInterval:      500 * time.Millisecond,
 		stopCh:             make(chan struct{}),
 		onConnectionChange: onConnectionChange,
 	}
+
+	h.logPool.New = func() interface{} {
+		return make([]LogEntry, 0, h.maxBufferSize)
+	}
+	h.metricPool.New = func() interface{} {
+		return make([]MetricEntry, 0, h.maxBufferSize)
+	}
+
+	h.logBuffer = h.logPool.Get().([]LogEntry)
+	h.metricBuffer = h.metricPool.Get().([]MetricEntry)
+
+	return h
 }
 
 // Run starts the hub's main event loop. Should be called in a goroutine.
@@ -156,20 +169,26 @@ func (h *Hub) flush() {
 
 	// Swap buffers
 	logBatch := h.logBuffer
-	h.logBuffer = make([]LogEntry, 0, h.maxBufferSize)
+	h.logBuffer = h.logPool.Get().([]LogEntry)
 
 	metricBatch := h.metricBuffer
-	h.metricBuffer = make([]MetricEntry, 0, h.maxBufferSize)
+	h.metricBuffer = h.metricPool.Get().([]MetricEntry)
 	h.bufferMu.Unlock()
 
 	// Broadcast Logs if any
 	if len(logBatch) > 0 {
 		h.broadcastBatch(HubBatch{Type: "logs", Data: logBatch})
+		// Recycle logBatch
+		logBatch = logBatch[:0]
+		h.logPool.Put(logBatch)
 	}
 
 	// Broadcast Metrics if any
 	if len(metricBatch) > 0 {
 		h.broadcastBatch(HubBatch{Type: "metrics", Data: metricBatch})
+		// Recycle metricBatch
+		metricBatch = metricBatch[:0]
+		h.metricPool.Put(metricBatch)
 	}
 }
 

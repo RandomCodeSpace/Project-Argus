@@ -10,6 +10,7 @@ import (
 
 	"github.com/RandomCodeSpace/argus/internal/storage"
 	"github.com/coder/websocket"
+	"golang.org/x/sync/errgroup"
 )
 
 // LiveSnapshot is the data payload pushed to all event WS clients.
@@ -44,6 +45,9 @@ type EventHub struct {
 	metricsCh    chan MetricEntry
 	logBuffer    []LogEntry
 	metricBuffer []MetricEntry
+
+	stopOnce sync.Once
+	stopCh   chan struct{}
 }
 
 // NewEventHub creates a new event notification hub.
@@ -57,6 +61,7 @@ func NewEventHub(repo *storage.Repository, onConnect, onDisconnect func()) *Even
 		metricsCh:    make(chan MetricEntry, 1000),
 		logBuffer:    make([]LogEntry, 0, 100),
 		metricBuffer: make([]MetricEntry, 0, 100),
+		stopCh:       make(chan struct{}),
 	}
 }
 
@@ -67,9 +72,17 @@ func (h *EventHub) Start(ctx context.Context, snapshotInterval, batchInterval ti
 	defer snapshotTicker.Stop()
 	defer batchTicker.Stop()
 
+	slog.Info("🌐 EventHub started",
+		"snapshot_interval", snapshotInterval,
+		"batch_interval", batchInterval)
+
 	for {
 		select {
 		case <-ctx.Done():
+			slog.Info("🌐 EventHub stopping via context...")
+			return
+		case <-h.stopCh:
+			slog.Info("🌐 EventHub stopping via signal...")
 			return
 		case <-snapshotTicker.C:
 			h.flushSnapshots()
@@ -173,7 +186,7 @@ func (h *EventHub) updateClientFilter(c *websocket.Conn, service string) {
 	h.mu.Unlock()
 }
 
-// flushSnapshots computes per-service snapshots and pushes to matching clients.
+// flushSnapshots computes per-service snapshots in parallel and pushes to matching clients.
 func (h *EventHub) flushSnapshots() {
 	h.mu.Lock()
 	if !h.pending {
@@ -194,21 +207,44 @@ func (h *EventHub) flushSnapshots() {
 	}
 	h.mu.Unlock()
 
-	// Compute one snapshot per unique filter, push to matching clients
+	// Compute snapshots in parallel using errgroup
+	g, ctx := errgroup.WithContext(context.Background())
+	snapshotMap := make(map[string]*LiveSnapshot)
+	var snapMu sync.Mutex
+
+	for service := range groups {
+		service := service // Capture
+		g.Go(func() error {
+			snap := h.computeSnapshot(service)
+			if snap != nil {
+				snapMu.Lock()
+				snapshotMap[service] = snap
+				snapMu.Unlock()
+			}
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		slog.Error("❌ Parallel snapshot computation failed", "error", err)
+	}
+
+	// Broadcast memoized snapshots to matching clients
 	for service, clients := range groups {
-		snapshot := h.computeSnapshot(service)
-		if snapshot == nil {
+		snap, ok := snapshotMap[service]
+		if !ok {
 			continue
 		}
-		msg, err := json.Marshal(snapshot)
+
+		msg, err := json.Marshal(snap)
 		if err != nil {
 			slog.Error("Event WS marshal failed", "error", err)
 			continue
 		}
 
 		for _, conn := range clients {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			if err := conn.Write(ctx, websocket.MessageText, msg); err != nil {
+			writeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			if err := conn.Write(writeCtx, websocket.MessageText, msg); err != nil {
 				slog.Debug("Event WS send failed, removing client", "error", err)
 				h.removeClient(conn)
 				conn.Close(websocket.StatusGoingAway, "write error")
@@ -317,4 +353,10 @@ func (h *EventHub) computeSnapshot(service string) *LiveSnapshot {
 	}
 
 	return snapshot
+}
+
+func (h *EventHub) Stop() {
+	h.stopOnce.Do(func() {
+		close(h.stopCh)
+	})
 }

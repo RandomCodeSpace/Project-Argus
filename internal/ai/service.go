@@ -30,24 +30,17 @@ func NewService(repo *storage.Repository) *Service {
 	}
 
 	// Initialize Azure OpenAI
-	// Using generic openai driver which supports Azure via base URL
 	opts := []openai.Option{
 		openai.WithAPIType(openai.APITypeAzure),
 		openai.WithBaseURL(os.Getenv("AZURE_OPENAI_ENDPOINT")),
 		openai.WithToken(os.Getenv("AZURE_OPENAI_KEY")),
 		openai.WithModel(os.Getenv("AZURE_OPENAI_MODEL")),
-		// The deployment name is often mapped to model in Azure SDKs or needs explicit handling
-		// langchaingo's openai adapter handles this via BaseURL/Model usually.
-		// DeploymentName might be needed depending on the library version.
-		// We'll assume standard env vars work for now or basic setup.
 	}
 
-	// If using a specific deployment name as model
 	if deployment := os.Getenv("AZURE_OPENAI_DEPLOYMENT"); deployment != "" {
 		opts = append(opts, openai.WithModel(deployment))
 	}
 
-	// If API version is needed
 	if apiVersion := os.Getenv("AZURE_OPENAI_API_VERSION"); apiVersion != "" {
 		opts = append(opts, openai.WithAPIVersion(apiVersion))
 	}
@@ -59,7 +52,14 @@ func NewService(repo *storage.Repository) *Service {
 	}
 
 	queueSize := 100
+	if qs := os.Getenv("AI_QUEUE_SIZE"); qs != "" {
+		fmt.Sscanf(qs, "%d", &queueSize)
+	}
+
 	workerPool := 3
+	if wp := os.Getenv("AI_WORKER_POOL"); wp != "" {
+		fmt.Sscanf(wp, "%d", &workerPool)
+	}
 
 	s := &Service{
 		repo:       repo,
@@ -93,26 +93,21 @@ func (s *Service) Stop() {
 	s.wg.Wait()
 }
 
-// EnqueueLog adds a log to the analysis queue if it meets criteria.
 func (s *Service) EnqueueLog(l storage.Log) {
 	if !s.enabled {
 		return
 	}
-	// Simple criteria: Severity is ERROR or CRITICAL
-	// Adjust string check to match OTLP mapping
 	severity := strings.ToUpper(l.Severity)
 	if strings.Contains(severity, "ERROR") || strings.Contains(severity, "CRITICAL") || strings.Contains(severity, "FATAL") {
 		select {
 		case s.workQueue <- l:
 		default:
-			// Drop if queue full to avoid blocking ingestion
 			log.Println("AI work queue full, dropping log analysis")
 		}
 	}
 }
 
 func (s *Service) analyzeLog(ctx context.Context, l storage.Log) {
-	// Create a prompt
 	prompt := fmt.Sprintf(`Analyze the following error log and provide a brief, actionable insight (max 2 sentences).
 	
 	Service: %s

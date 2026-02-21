@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"sync"
+
 	"github.com/RandomCodeSpace/argus/internal/config"
 	"github.com/RandomCodeSpace/argus/internal/storage"
 	"github.com/RandomCodeSpace/argus/internal/telemetry"
@@ -18,6 +20,7 @@ import (
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	metricspb "go.opentelemetry.io/proto/otlp/metrics/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
+	"golang.org/x/sync/errgroup"
 )
 
 type TraceServer struct {
@@ -165,151 +168,142 @@ func (s *MetricsServer) Export(ctx context.Context, req *colmetricspb.ExportMetr
 // Export handles incoming OTLP trace data.
 func (s *TraceServer) Export(ctx context.Context, req *coltracepb.ExportTraceServiceRequest) (*coltracepb.ExportTraceServiceResponse, error) {
 	slog.Info("📥 [TRACES] Received Request", "resource_spans", len(req.ResourceSpans))
-	var spansToInsert []storage.Span
-	var tracesToUpsert []storage.Trace
+
+	var (
+		spansMu         sync.Mutex
+		spansToInsert   []storage.Span
+		tracesToUpsert  []storage.Trace
+		synthesizedLogs []storage.Log
+	)
+
+	g, _ := errgroup.WithContext(ctx)
 
 	for _, resourceSpans := range req.ResourceSpans {
-		serviceName := getServiceName(resourceSpans.Resource.Attributes)
+		resourceSpans := resourceSpans // Capture
+		g.Go(func() error {
+			serviceName := getServiceName(resourceSpans.Resource.Attributes)
 
-		if !shouldIngestService(serviceName, s.allowedServices, s.excludedServices) {
-			slog.Debug("🚫 [TRACES] Dropped service", "service", serviceName)
-			continue
-		}
+			if !shouldIngestService(serviceName, s.allowedServices, s.excludedServices) {
+				slog.Debug("🚫 [TRACES] Dropped service", "service", serviceName)
+				return nil
+			}
 
-		// slog.Debug("   Start processing ResourceSpans", "service", serviceName)
+			localSpans := make([]storage.Span, 0)
+			localTraces := make([]storage.Trace, 0)
+			localLogs := make([]storage.Log, 0)
 
-		for _, scopeSpans := range resourceSpans.ScopeSpans {
-			// slog.Debug("     Processing ScopeSpans", "scope", scopeSpans.Scope.Name, "spans", len(scopeSpans.Spans))
-			for _, span := range scopeSpans.Spans {
-				startTime := time.Unix(0, int64(span.StartTimeUnixNano))
-				endTime := time.Unix(0, int64(span.EndTimeUnixNano))
-				duration := endTime.Sub(startTime).Microseconds()
+			for _, scopeSpans := range resourceSpans.ScopeSpans {
+				for _, span := range scopeSpans.Spans {
+					startTime := time.Unix(0, int64(span.StartTimeUnixNano))
+					endTime := time.Unix(0, int64(span.EndTimeUnixNano))
+					duration := endTime.Sub(startTime).Microseconds()
 
-				// Log specific span details
-				/*
-					slog.Debug("       -> Span",
-						"name", span.Name,
-						"trace_id", fmt.Sprintf("%x", span.TraceId),
-						"span_id", fmt.Sprintf("%x", span.SpanId),
-						"duration_us", duration,
-					)
-				*/
+					attrs, _ := json.Marshal(span.Attributes)
 
-				attrs, _ := json.Marshal(span.Attributes)
-
-				// Create Span Model
-				sModel := storage.Span{
-					TraceID:        fmt.Sprintf("%x", span.TraceId),
-					SpanID:         fmt.Sprintf("%x", span.SpanId),
-					ParentSpanID:   fmt.Sprintf("%x", span.ParentSpanId),
-					OperationName:  span.Name,
-					StartTime:      startTime,
-					EndTime:        endTime,
-					Duration:       duration,
-					ServiceName:    serviceName,
-					AttributesJSON: storage.CompressedText(attrs),
-				}
-				spansToInsert = append(spansToInsert, sModel)
-
-				// Create/Update Trace Model for indexing
-				statusStr := "STATUS_CODE_UNSET"
-				if span.Status != nil {
-					statusStr = span.Status.Code.String()
-				}
-
-				tModel := storage.Trace{
-					TraceID:     fmt.Sprintf("%x", span.TraceId),
-					ServiceName: serviceName,
-					Timestamp:   startTime,
-					Duration:    duration,
-					Status:      statusStr,
-				}
-				tracesToUpsert = append(tracesToUpsert, tModel)
-
-				// Synthesize Logs from Span Events (exceptions) and Status
-				var synthesizedLogs []storage.Log
-				// 1. Check for Events (e.g., exceptions)
-				for _, event := range span.Events {
-					severity := "INFO"
-					if event.Name == "exception" {
-						severity = "ERROR"
-					}
-
-					if !shouldIngestSeverity(severity, s.minSeverity) {
-						continue
-					}
-
-					body := event.Name
-					// Try to find exception.message or similar
-					for _, attr := range event.Attributes {
-						if attr.Key == "exception.message" || attr.Key == "message" {
-							body = attr.Value.GetStringValue()
-							break
-						}
-					}
-
-					eventAttrs, _ := json.Marshal(event.Attributes)
-
-					l := storage.Log{
+					// Create Span Model
+					sModel := storage.Span{
 						TraceID:        fmt.Sprintf("%x", span.TraceId),
 						SpanID:         fmt.Sprintf("%x", span.SpanId),
-						Severity:       severity,
-						Body:           storage.CompressedText(body),
+						ParentSpanID:   fmt.Sprintf("%x", span.ParentSpanId),
+						OperationName:  span.Name,
+						StartTime:      startTime,
+						EndTime:        endTime,
+						Duration:       duration,
 						ServiceName:    serviceName,
-						AttributesJSON: storage.CompressedText(eventAttrs),
-						Timestamp:      time.Unix(0, int64(event.TimeUnixNano)),
+						AttributesJSON: storage.CompressedText(attrs),
 					}
-					synthesizedLogs = append(synthesizedLogs, l)
-				}
+					localSpans = append(localSpans, sModel)
 
-				// 2. Check for Span Status Error (if no events created specific errors)
-				// Only if we haven't already created an error log from events for this span
-				hasErrorLog := false
-				for _, sl := range synthesizedLogs {
-					if sl.Severity == "ERROR" {
-						hasErrorLog = true
-						break
+					// Create/Update Trace Model for indexing
+					statusStr := "STATUS_CODE_UNSET"
+					if span.Status != nil {
+						statusStr = span.Status.Code.String()
 					}
-				}
 
-				if !hasErrorLog && span.Status != nil && span.Status.Code == tracepb.Status_STATUS_CODE_ERROR {
-					// Always ingest error status if min severity allows ERROR (which is usually true)
-					if shouldIngestSeverity("ERROR", s.minSeverity) {
-						msg := span.Status.Message
-						if msg == "" {
-							msg = fmt.Sprintf("Span '%s' failed", span.Name)
+					tModel := storage.Trace{
+						TraceID:     fmt.Sprintf("%x", span.TraceId),
+						ServiceName: serviceName,
+						Timestamp:   startTime,
+						Duration:    duration,
+						Status:      statusStr,
+					}
+					localTraces = append(localTraces, tModel)
+
+					// Synthesize Logs from Span Events (exceptions) and Status
+					for _, event := range span.Events {
+						severity := "INFO"
+						if event.Name == "exception" {
+							severity = "ERROR"
 						}
+
+						if !shouldIngestSeverity(severity, s.minSeverity) {
+							continue
+						}
+
+						body := event.Name
+						for _, attr := range event.Attributes {
+							if attr.Key == "exception.message" || attr.Key == "message" {
+								body = attr.Value.GetStringValue()
+								break
+							}
+						}
+
+						eventAttrs, _ := json.Marshal(event.Attributes)
 
 						l := storage.Log{
 							TraceID:        fmt.Sprintf("%x", span.TraceId),
 							SpanID:         fmt.Sprintf("%x", span.SpanId),
-							Severity:       "ERROR",
-							Body:           storage.CompressedText(msg),
+							Severity:       severity,
+							Body:           storage.CompressedText(body),
 							ServiceName:    serviceName,
-							AttributesJSON: "{}", // Could copy span attributes
-							Timestamp:      endTime,
+							AttributesJSON: storage.CompressedText(eventAttrs),
+							Timestamp:      time.Unix(0, int64(event.TimeUnixNano)),
 						}
-						synthesizedLogs = append(synthesizedLogs, l)
+						localLogs = append(localLogs, l)
 					}
-				}
 
-				// Batch persist synthesized logs
-				if len(synthesizedLogs) > 0 {
-					if err := s.repo.BatchCreateLogs(synthesizedLogs); err != nil {
-						slog.Error("❌ Failed to persist synthesized logs", "error", err)
-					} else {
-						// slog.Debug("⚠️ Synthesized logs from trace span errors", "count", len(synthesizedLogs))
-						// Broadcast
-						if s.logCallback != nil {
-							for _, sl := range synthesizedLogs {
-								s.logCallback(sl)
+					hasErrorLog := false
+					for _, sl := range localLogs {
+						if sl.Severity == "ERROR" && sl.SpanID == fmt.Sprintf("%x", span.SpanId) {
+							hasErrorLog = true
+							break
+						}
+					}
+
+					if !hasErrorLog && span.Status != nil && span.Status.Code == tracepb.Status_STATUS_CODE_ERROR {
+						if shouldIngestSeverity("ERROR", s.minSeverity) {
+							msg := span.Status.Message
+							if msg == "" {
+								msg = fmt.Sprintf("Span '%s' failed", span.Name)
 							}
+
+							l := storage.Log{
+								TraceID:        fmt.Sprintf("%x", span.TraceId),
+								SpanID:         fmt.Sprintf("%x", span.SpanId),
+								Severity:       "ERROR",
+								Body:           storage.CompressedText(msg),
+								ServiceName:    serviceName,
+								AttributesJSON: "{}",
+								Timestamp:      endTime,
+							}
+							localLogs = append(localLogs, l)
 						}
 					}
 				}
 			}
-		}
+
+			// Fan-In: Collect local results into shared buffers
+			spansMu.Lock()
+			spansToInsert = append(spansToInsert, localSpans...)
+			tracesToUpsert = append(tracesToUpsert, localTraces...)
+			synthesizedLogs = append(synthesizedLogs, localLogs...)
+			spansMu.Unlock()
+
+			return nil
+		})
 	}
+
+	g.Wait()
 
 	// Persist - CRITICAL ORDER: Traces MUST be inserted before Spans due to FK
 	if len(tracesToUpsert) > 0 {
@@ -338,85 +332,82 @@ func (s *TraceServer) Export(ctx context.Context, req *coltracepb.ExportTraceSer
 // Export handles incoming OTLP log data.
 func (s *LogsServer) Export(ctx context.Context, req *collogspb.ExportLogsServiceRequest) (*collogspb.ExportLogsServiceResponse, error) {
 	// slog.Debug("📥 [LOGS] Received Request", "resource_logs", len(req.ResourceLogs))
-	var logsToInsert []storage.Log
+
+	var (
+		mu           sync.Mutex
+		logsToInsert []storage.Log
+	)
+
+	g, _ := errgroup.WithContext(ctx)
 
 	for _, resourceLogs := range req.ResourceLogs {
-		serviceName := getServiceName(resourceLogs.Resource.Attributes)
+		resourceLogs := resourceLogs // Capture
+		g.Go(func() error {
+			serviceName := getServiceName(resourceLogs.Resource.Attributes)
 
-		if !shouldIngestService(serviceName, s.allowedServices, s.excludedServices) {
-			slog.Debug("🚫 [LOGS] Dropped service", "service", serviceName)
-			continue
-		}
-
-		// slog.Debug("   Start processing ResourceLogs", "service", serviceName)
-
-		for _, scopeLogs := range resourceLogs.ScopeLogs {
-			// slog.Debug("     Processing ScopeLogs", "scope", scopeLogs.Scope.Name, "records", len(scopeLogs.LogRecords))
-			for _, l := range scopeLogs.LogRecords {
-				// Convert numeric severity to string if text is missing
-				severity := l.SeverityText
-				if severity == "" {
-					severity = l.SeverityNumber.String()
-				}
-
-				if !shouldIngestSeverity(severity, s.minSeverity) {
-					// slog.Debug("🚫 [LOGS] Dropped low severity", "severity", severity)
-					continue
-				}
-
-				timestamp := time.Unix(0, int64(l.TimeUnixNano))
-				if timestamp.Unix() == 0 {
-					timestamp = time.Now()
-				}
-
-				bodyStr := l.Body.GetStringValue()
-				/*
-					if len(bodyStr) > 100 {
-						truncated := bodyStr[:97] + "..."
-					}
-				*/
-
-				// Log specific log details
-				/*
-					slog.Debug("       -> Log",
-						"severity", severity,
-						"body", truncated,
-						"trace_id", fmt.Sprintf("%x", l.TraceId),
-					)
-				*/
-
-				attrs, _ := json.Marshal(l.Attributes)
-
-				logEntry := storage.Log{
-					TraceID:        fmt.Sprintf("%x", l.TraceId),
-					SpanID:         fmt.Sprintf("%x", l.SpanId),
-					Severity:       severity,
-					Body:           storage.CompressedText(bodyStr),
-					ServiceName:    serviceName,
-					AttributesJSON: storage.CompressedText(attrs),
-					Timestamp:      timestamp,
-				}
-
-				logsToInsert = append(logsToInsert, logEntry)
+			if !shouldIngestService(serviceName, s.allowedServices, s.excludedServices) {
+				slog.Debug("🚫 [LOGS] Dropped service", "service", serviceName)
+				return nil
 			}
-		}
+
+			localLogs := make([]storage.Log, 0)
+
+			for _, scopeLogs := range resourceLogs.ScopeLogs {
+				for _, l := range scopeLogs.LogRecords {
+					severity := l.SeverityText
+					if severity == "" {
+						severity = l.SeverityNumber.String()
+					}
+
+					if !shouldIngestSeverity(severity, s.minSeverity) {
+						continue
+					}
+
+					timestamp := time.Unix(0, int64(l.TimeUnixNano))
+					if timestamp.Unix() == 0 {
+						timestamp = time.Now()
+					}
+
+					bodyStr := l.Body.GetStringValue()
+					attrs, _ := json.Marshal(l.Attributes)
+
+					logEntry := storage.Log{
+						TraceID:        fmt.Sprintf("%x", l.TraceId),
+						SpanID:         fmt.Sprintf("%x", l.SpanId),
+						Severity:       severity,
+						Body:           storage.CompressedText(bodyStr),
+						ServiceName:    serviceName,
+						AttributesJSON: storage.CompressedText(attrs),
+						Timestamp:      timestamp,
+					}
+					localLogs = append(localLogs, logEntry)
+				}
+			}
+
+			mu.Lock()
+			logsToInsert = append(logsToInsert, localLogs...)
+			mu.Unlock()
+
+			return nil
+		})
 	}
+
+	g.Wait()
 
 	if len(logsToInsert) > 0 {
 		if err := s.repo.BatchCreateLogs(logsToInsert); err != nil {
 			slog.Error("❌ Failed to insert logs", "error", err)
 			return nil, err
 		}
-		// slog.Debug("✅ Successfully persisted logs", "count", len(logsToInsert))
 		if s.metrics != nil {
 			s.metrics.RecordIngestion(len(logsToInsert))
 		}
-	}
 
-	// Notify listener
-	if s.logCallback != nil {
-		for _, l := range logsToInsert {
-			s.logCallback(l)
+		// Notify listener
+		if s.logCallback != nil {
+			for _, l := range logsToInsert {
+				s.logCallback(l)
+			}
 		}
 	}
 

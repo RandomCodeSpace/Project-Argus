@@ -60,7 +60,7 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	slog.Info("🚀 Starting Argus V5.3", "env", cfg.Env, "log_level", level)
+	slog.Info("🚀 Starting Argus V5.4", "env", cfg.Env, "log_level", level)
 
 	// 1. Initialize Internal Telemetry (first — everything registers metrics against this)
 	metrics := telemetry.New()
@@ -253,18 +253,23 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
 
-	slog.Info("Shutting down ARGUS V5.3...")
+	slog.Info("Shutting down ARGUS V5.4...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	tsdbAgg.Stop()
+	// 1. Stop high-ingestion paths
 	grpcServer.GracefulStop()
 	if err := srv.Shutdown(ctx); err != nil {
 		slog.Error("HTTP server forced shutdown", "error", err)
 	}
 
-	slog.Info("✅ ARGUS V5.3 shutdown complete")
+	// 2. Stop processing engines (order: Hubs -> AI -> TSDB)
+	aiService.Stop()
+	tsdbAgg.Stop()
+	eventHub.Stop() // Note: New Stop() method should be called if implemented, otherwise context handles it
+
+	slog.Info("✅ ARGUS V5.4 shutdown complete")
 }
 
 func printBanner() {
@@ -275,7 +280,7 @@ func printBanner() {
   / ___ \|  _ <| |_| | |_| |___) |   \ V /  ___) |__) | |_| |
  /_/   \_\_| \_\\____|\\___/|____/     \_/  |____/____/|____/ 
 
-  ARGUS V5.3 (EMBEDDED TSDB) — High Performance Edition
+  ARGUS V5.4 (EMBEDDED TSDB) — High Performance Edition
   The Eye That Never Sleeps 👁️
 `
 	fmt.Println(banner)

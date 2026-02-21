@@ -43,7 +43,7 @@ Write-Host "[1/2] Starting Argus Backend..." -ForegroundColor Green
 $p = Start-Process pwsh -ArgumentList "-NoExit", "-Command", "Set-Location '$PSScriptRoot'; air" -PassThru
 $pids += $p.Id
 
-Start-Sleep -Seconds 2
+Start-Sleep -Seconds 5
 
 # 2. Frontend Dev Server
 Write-Host "[2/2] Starting Frontend Dev Server..." -ForegroundColor Green

@@ -28,6 +28,7 @@ type Aggregator struct {
 	mu         sync.Mutex
 	stopChan   chan struct{}
 	flushChan  chan []storage.MetricBucket
+	pool       sync.Pool
 }
 
 // NewAggregator creates a new TSDB aggregator.
@@ -38,6 +39,9 @@ func NewAggregator(repo *storage.Repository, windowSize time.Duration) *Aggregat
 		buckets:    make(map[string]*storage.MetricBucket),
 		stopChan:   make(chan struct{}),
 		flushChan:  make(chan []storage.MetricBucket, 100),
+	}
+	a.pool.New = func() interface{} {
+		return make([]storage.MetricBucket, 0, 100) // Initial capacity estimate
 	}
 	return a
 }
@@ -115,7 +119,7 @@ func (a *Aggregator) flush() {
 		return
 	}
 
-	batch := make([]storage.MetricBucket, 0, len(a.buckets))
+	batch := a.pool.Get().([]storage.MetricBucket)
 	for _, b := range a.buckets {
 		batch = append(batch, *b)
 	}
@@ -126,6 +130,8 @@ func (a *Aggregator) flush() {
 	case a.flushChan <- batch:
 	default:
 		slog.Warn("⚠️ TSDB flush channel full, dropping metric batch", "count", len(batch))
+		batch = batch[:0]
+		a.pool.Put(batch)
 	}
 }
 
@@ -135,6 +141,7 @@ func (a *Aggregator) persistenceWorker(ctx context.Context) {
 		select {
 		case batch := <-a.flushChan:
 			if len(batch) == 0 {
+				a.pool.Put(batch[:0])
 				continue
 			}
 			err := a.repo.BatchCreateMetrics(batch)
@@ -143,6 +150,9 @@ func (a *Aggregator) persistenceWorker(ctx context.Context) {
 			} else {
 				slog.Debug("💾 TSDB persisted metric batch", "count", len(batch))
 			}
+			// Recycle the batch slice
+			batch = batch[:0]
+			a.pool.Put(batch)
 		case <-ctx.Done():
 			return
 		}
