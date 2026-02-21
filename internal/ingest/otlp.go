@@ -326,6 +326,19 @@ func (s *TraceServer) Export(ctx context.Context, req *coltracepb.ExportTraceSer
 		}
 	}
 
+	if len(synthesizedLogs) > 0 {
+		if err := s.repo.BatchCreateLogs(synthesizedLogs); err != nil {
+			slog.Error("❌ Failed to insert synthesized logs", "error", err)
+			// Continue, don't fail the whole trace request
+		}
+
+		if s.logCallback != nil {
+			for _, l := range synthesizedLogs {
+				s.logCallback(l)
+			}
+		}
+	}
+
 	return &coltracepb.ExportTraceServiceResponse{}, nil
 }
 
