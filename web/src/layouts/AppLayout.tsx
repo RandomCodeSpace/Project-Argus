@@ -12,7 +12,8 @@ import {
     LayoutDashboard,
     Network,
     ScrollText,
-    Activity,
+    Zap,
+    BarChart3,
     Settings,
 } from 'lucide-react'
 
@@ -30,8 +31,8 @@ const navItems: { key: PageKey; label: string; icon: typeof LayoutDashboard }[] 
     { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { key: 'map', label: 'Service Map', icon: Network },
     { key: 'logs', label: 'Logs', icon: ScrollText },
-    { key: 'traces', label: 'Traces', icon: Activity },
-    { key: 'metrics', label: 'Metrics', icon: Activity },
+    { key: 'traces', label: 'Traces', icon: Zap },
+    { key: 'metrics', label: 'Metrics', icon: BarChart3 },
     { key: 'settings', label: 'Settings', icon: Settings },
 ]
 

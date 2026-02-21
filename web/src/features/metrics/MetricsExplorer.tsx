@@ -22,9 +22,8 @@ import type { MetricBucket, MetricEntry } from '../../types'
 export function MetricsExplorer() {
     const { isLive } = useLiveMode()
     const tr = useTimeRange('5m')
-
     const [selectedMetric, setSelectedMetric] = useState<string | null>('orders_processed_total')
-    const [selectedService, setSelectedService] = useFilterParam('service', null)
+    const [selectedService] = useFilterParam('service', null)
 
     // --- 1. Historical Data (TSDB Buckets) ---
     const { data: historicalBuckets, isFetching: isFetchingHistorical } = useQuery<MetricBucket[]>({
@@ -185,24 +184,6 @@ export function MetricsExplorer() {
                         value={selectedMetric}
                         onChange={setSelectedMetric}
                         style={{ width: 250 }}
-                    />
-
-                    <Select
-                        label="Service"
-                        placeholder="All Services"
-                        size="xs"
-                        data={[
-                            { value: '', label: 'All Services' },
-                            ...(historicalBuckets?.reduce((acc: any[], b) => {
-                                if (b.service_name && !acc.find(s => s.value === b.service_name)) {
-                                    acc.push({ value: b.service_name, label: b.service_name })
-                                }
-                                return acc
-                            }, []) || [])
-                        ]}
-                        value={selectedService || ''}
-                        onChange={(v) => setSelectedService(v || null)}
-                        style={{ width: 200 }}
                     />
                 </Group>
             </Paper>
