@@ -29,13 +29,29 @@ Push-Location $RootDir
 go build -o "$tmpDir\orderservice.exe" ./test/orderservice
 go build -o "$tmpDir\paymentservice.exe" ./test/paymentservice
 go build -o "$tmpDir\inventoryservice.exe" ./test/inventoryservice
+go build -o "$tmpDir\authservice.exe" ./test/authservice
+go build -o "$tmpDir\userservice.exe" ./test/userservice
+go build -o "$tmpDir\shippingservice.exe" ./test/shippingservice
+go build -o "$tmpDir\notificationservice.exe" ./test/notificationservice
 Pop-Location
 Write-Host "  All services built" -ForegroundColor Green
 
 # ── Start services ──
 Write-Host "[2/4] Starting services..." -ForegroundColor Yellow
 
+$userProc = Start-Process -FilePath "$tmpDir\userservice.exe" -PassThru -WindowStyle Minimized
+Start-Sleep -Seconds 1
+
+$authProc = Start-Process -FilePath "$tmpDir\authservice.exe" -PassThru -WindowStyle Minimized
+Start-Sleep -Seconds 1
+
 $inventoryProc = Start-Process -FilePath "$tmpDir\inventoryservice.exe" -PassThru -WindowStyle Minimized
+Start-Sleep -Seconds 1
+
+$shippingProc = Start-Process -FilePath "$tmpDir\shippingservice.exe" -PassThru -WindowStyle Minimized
+Start-Sleep -Seconds 1
+
+$notificationProc = Start-Process -FilePath "$tmpDir\notificationservice.exe" -PassThru -WindowStyle Minimized
 Start-Sleep -Seconds 1
 
 $paymentProc = Start-Process -FilePath "$tmpDir\paymentservice.exe" -PassThru -WindowStyle Minimized
@@ -44,19 +60,23 @@ Start-Sleep -Seconds 1
 $orderProc = Start-Process -FilePath "$tmpDir\orderservice.exe" -PassThru -WindowStyle Minimized
 Start-Sleep -Seconds 1
 
-Write-Host "  Inventory Service (PID: $($inventoryProc.Id)) -> :9003" -ForegroundColor Green
-Write-Host "  Payment Service   (PID: $($paymentProc.Id))   -> :9002" -ForegroundColor Green
-Write-Host "  Order Service     (PID: $($orderProc.Id))     -> :9001" -ForegroundColor Green
+Write-Host "  User Service         (PID: $($userProc.Id))         -> :9005" -ForegroundColor Green
+Write-Host "  Auth Service         (PID: $($authProc.Id))         -> :9004" -ForegroundColor Green
+Write-Host "  Inventory Service    (PID: $($inventoryProc.Id))    -> :9003" -ForegroundColor Green
+Write-Host "  Shipping Service     (PID: $($shippingProc.Id))     -> :9006" -ForegroundColor Green
+Write-Host "  Notification Service (PID: $($notificationProc.Id)) -> :9007" -ForegroundColor Green
+Write-Host "  Payment Service      (PID: $($paymentProc.Id))      -> :9002" -ForegroundColor Green
+Write-Host "  Order Service        (PID: $($orderProc.Id))        -> :9001" -ForegroundColor Green
 Write-Host ""
 
 # ── Cleanup function ──
 function Stop-TestServices {
     Write-Host ""
     Write-Host "[4/4] Cleaning up..." -ForegroundColor Yellow
-    @($orderProc, $paymentProc, $inventoryProc) | ForEach-Object {
+    @($orderProc, $paymentProc, $inventoryProc, $authProc, $userProc, $shippingProc, $notificationProc) | ForEach-Object {
         try { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } catch { }
     }
-    Remove-Item "$tmpDir\orderservice.exe", "$tmpDir\paymentservice.exe", "$tmpDir\inventoryservice.exe" -Force -ErrorAction SilentlyContinue
+    Remove-Item "$tmpDir\orderservice.exe", "$tmpDir\paymentservice.exe", "$tmpDir\inventoryservice.exe", "$tmpDir\authservice.exe", "$tmpDir\userservice.exe", "$tmpDir\shippingservice.exe", "$tmpDir\notificationservice.exe" -Force -ErrorAction SilentlyContinue
     Write-Host "  All test services stopped" -ForegroundColor Green
 }
 
@@ -74,20 +94,28 @@ try {
         # Parallel execution
         Write-Host "  Starting parallel execution with $Parallel threads..." -ForegroundColor Cyan
         
-        $results = 1..$RequestCount | ForEach-Object -Parallel {
-            $url = $using:TargetUrl
-            try {
-                $response = Invoke-WebRequest -Uri $url -Method POST -TimeoutSec 10 -ErrorAction Stop
-                if ($response.StatusCode -eq 200) { return "OK" } else { return "FAIL" }
-            }
-            catch {
-                return "FAIL"
-            }
-        } -ThrottleLimit $Parallel
+        $total = 0
+        $success = 0
+        $failure = 0
 
-        $success = ($results | Where-Object { $_ -eq "OK" }).Count
-        $failure = ($results | Where-Object { $_ -eq "FAIL" }).Count
-        $total = $results.Count
+        while ($true) {
+            $results = 1..$Parallel | ForEach-Object -Parallel {
+                $url = $using:TargetUrl
+                try {
+                    $response = Invoke-WebRequest -Uri $url -Method POST -TimeoutSec 10 -ErrorAction Stop
+                    if ($response.StatusCode -eq 200) { return "OK" } else { return "FAIL" }
+                }
+                catch {
+                    return "FAIL"
+                }
+            } -ThrottleLimit $Parallel
+
+            $success += ($results | Where-Object { $_ -eq "OK" }).Count
+            $failure += ($results | Where-Object { $_ -eq "FAIL" }).Count
+            $total += $results.Count
+
+            Write-Host "  Progress: $total requests | OK: $success | FAIL: $failure" -ForegroundColor Cyan
+        }
     }
     else {
         # Sequential execution
@@ -95,7 +123,7 @@ try {
         $success = 0
         $failure = 0
 
-        for ($i = 1; $i -le $RequestCount; $i++) {
+        while ($true) {
             try {
                 $response = Invoke-WebRequest -Uri $TargetUrl -Method POST -TimeoutSec 10 -ErrorAction SilentlyContinue
                 if ($response.StatusCode -eq 200) { $success++ } else { $failure++ }

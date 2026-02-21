@@ -10,6 +10,7 @@ import {
     Badge,
     ThemeIcon,
     Box,
+    LoadingOverlay,
 } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
 import ReactEChartsCore from 'echarts-for-react/lib/core'
@@ -24,7 +25,7 @@ import {
 import { CanvasRenderer } from 'echarts/renderers'
 import { Activity, AlertTriangle, Clock, Layers } from 'lucide-react'
 import type { TrafficPoint, ServiceError, DashboardStats } from '../../types'
-import { TimeRangeSelector, useTimeRange } from '../../components/TimeRangeSelector'
+import { useTimeRange } from '../../components/TimeRangeSelector'
 import { useFilterParam } from '../../hooks/useFilterParams'
 import { useLiveMode } from '../../contexts/LiveModeContext'
 
@@ -55,20 +56,20 @@ export function Dashboard() {
 
     // Traffic data
     const trafficQueryKey = isLive ? ['live', 'traffic'] : ['traffic', tr.start, tr.end, selectedService]
-    const { data: traffic } = useQuery<TrafficPoint[]>({
+    const { data: traffic, isFetching: isFetchingTraffic } = useQuery<TrafficPoint[]>({
         queryKey: trafficQueryKey,
         queryFn: () => fetch(`/api/metrics/traffic?start=${tr.start}&end=${tr.end}${serviceParams}`).then(r => r.json()),
         refetchInterval: isLive ? false : 30000,
-        enabled: !isLive || !!(isLive && trafficQueryKey[0] === 'live'),
+        enabled: !isLive,
     })
 
     // Dashboard Stats (includes Top Failing Services)
     const statsQueryKey = isLive ? ['live', 'dashboardStats'] : ['dashboardStats', tr.start, tr.end, selectedService]
-    const { data: stats } = useQuery<DashboardStats>({
+    const { data: stats, isFetching: isFetchingStats } = useQuery<DashboardStats>({
         queryKey: statsQueryKey,
         queryFn: () => fetch(`/api/metrics/dashboard?start=${tr.start}&end=${tr.end}${serviceParams}`).then(r => r.json()),
         refetchInterval: isLive ? false : 30000,
-        enabled: !isLive || !!(isLive && statsQueryKey[0] === 'live'),
+        enabled: !isLive,
     })
 
     const topFailing = stats?.top_failing_services || []
@@ -150,50 +151,51 @@ export function Dashboard() {
                         clearable
                         styles={{ input: { width: 180 } }}
                     />
-                    {!isLive && (
-                        <TimeRangeSelector value={tr.timeRange} onChange={tr.setTimeRange} />
-                    )}
                 </Group>
             </Group>
 
-            <SimpleGrid cols={{ base: 2, md: 4 }}>
-                {statCards.map((s) => (
-                    <Paper key={s.label} shadow="xs" p="md" radius="md" withBorder>
-                        <Group justify="space-between" align="flex-start">
-                            <Box>
-                                <Text size="xs" c="dimmed" tt="uppercase" fw={600}>{s.label}</Text>
-                                <Title order={3} mt={4}>{typeof s.value === 'number' ? s.value.toLocaleString() : s.value}</Title>
-                            </Box>
-                            <ThemeIcon variant="light" color={s.color} size="lg" radius="md">
-                                <s.icon size={18} />
-                            </ThemeIcon>
-                        </Group>
-                    </Paper>
-                ))}
-            </SimpleGrid>
+            <Box style={{ position: 'relative' }}>
+                <LoadingOverlay visible={(isFetchingTraffic || isFetchingStats) && !isLive} zIndex={1000} overlayProps={{ radius: 'sm', blur: 2 }} />
 
-            <Paper shadow="xs" p="md" radius="md" withBorder>
-                <Text fw={600} mb="sm">Traffic Over Time</Text>
-                <Box style={{ height: 300 }}>
-                    <ReactEChartsCore echarts={echarts} option={trafficChartOption} style={{ height: '100%' }} />
-                </Box>
-            </Paper>
+                <SimpleGrid cols={{ base: 2, md: 4 }} mb="md">
+                    {statCards.map((s) => (
+                        <Paper key={s.label} shadow="xs" p="md" radius="md" withBorder>
+                            <Group justify="space-between" align="flex-start">
+                                <Box>
+                                    <Text size="xs" c="dimmed" tt="uppercase" fw={600}>{s.label}</Text>
+                                    <Title order={3} mt={4}>{typeof s.value === 'number' ? s.value.toLocaleString() : s.value}</Title>
+                                </Box>
+                                <ThemeIcon variant="light" color={s.color} size="lg" radius="md">
+                                    <s.icon size={18} />
+                                </ThemeIcon>
+                            </Group>
+                        </Paper>
+                    ))}
+                </SimpleGrid>
 
-            <Paper shadow="xs" p="md" radius="md" withBorder>
-                <Group justify="space-between" mb="sm">
-                    <Text fw={600}>Top Failing Services</Text>
-                    <Badge variant="light" color="red" size="sm">{(topFailing || []).length} services</Badge>
-                </Group>
-                <Box style={{ height: 250 }}>
-                    {(topFailing || []).length > 0 ? (
-                        <ReactEChartsCore echarts={echarts} option={failingChartOption} style={{ height: '100%' }} />
-                    ) : (
-                        <Group justify="center" align="center" style={{ height: '100%' }}>
-                            <Text c="dimmed">No failing services detected</Text>
-                        </Group>
-                    )}
-                </Box>
-            </Paper>
+                <Paper shadow="xs" p="md" radius="md" withBorder mb="md">
+                    <Text fw={600} mb="sm">Traffic Over Time</Text>
+                    <Box style={{ height: 300 }}>
+                        <ReactEChartsCore echarts={echarts} option={trafficChartOption} style={{ height: '100%' }} />
+                    </Box>
+                </Paper>
+
+                <Paper shadow="xs" p="md" radius="md" withBorder>
+                    <Group justify="space-between" mb="sm">
+                        <Text fw={600}>Top Failing Services</Text>
+                        <Badge variant="light" color="red" size="sm">{(topFailing || []).length} services</Badge>
+                    </Group>
+                    <Box style={{ height: 250 }}>
+                        {(topFailing || []).length > 0 ? (
+                            <ReactEChartsCore echarts={echarts} option={failingChartOption} style={{ height: '100%' }} />
+                        ) : (
+                            <Group justify="center" align="center" style={{ height: '100%' }}>
+                                <Text c="dimmed">No failing services detected</Text>
+                            </Group>
+                        )}
+                    </Box>
+                </Paper>
+            </Box>
         </Stack>
     )
 }

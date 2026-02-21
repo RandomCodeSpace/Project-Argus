@@ -11,16 +11,17 @@ import {
     Box,
     Code,
     Tooltip,
-    Switch,
     Button,
     Collapse,
+    LoadingOverlay,
 } from '@mantine/core'
 import { useQuery } from '@tanstack/react-query'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { Search, Pause, Play, Sparkles, ChevronRight, ChevronDown, List } from 'lucide-react'
+import { Search, Sparkles, ChevronRight, ChevronDown, List } from 'lucide-react'
 import type { LogEntry, LogResponse } from '../../types'
-import { TimeRangeSelector, useTimeRange, TIME_RANGES } from '../../components/TimeRangeSelector'
+import { useTimeRange, TIME_RANGES } from '../../components/TimeRangeSelector'
 import { useFilterParam, useFilterParamString } from '../../hooks/useFilterParams'
+import { useLiveMode } from '../../contexts/LiveModeContext'
 
 const SEVERITY_COLORS: Record<string, string> = {
     ERROR: 'red',
@@ -35,7 +36,7 @@ export function LogExplorer() {
     const [selectedService, setSelectedService] = useFilterParam('service', null)
     const [selectedSeverity, setSelectedSeverity] = useFilterParam('severity', null)
     const [searchText, setSearchText] = useFilterParamString('log_q', '')
-    const [liveMode, setLiveMode] = useState(false)
+    const { isLive: liveMode } = useLiveMode()
     const [liveLogs, setLiveLogs] = useState<LogEntry[]>([])
 
     // Expanded state
@@ -58,7 +59,7 @@ export function LogExplorer() {
     })
 
     // Fetch historical logs using selected time range
-    const { data: historicalData } = useQuery<LogResponse>({
+    const { data: historicalData, isFetching: isFetchingLogs } = useQuery<LogResponse>({
         queryKey: ['logs', selectedService, selectedSeverity, searchText, tr.start, tr.end],
         queryFn: () => {
             const params = new URLSearchParams()
@@ -104,14 +105,8 @@ export function LogExplorer() {
 
         ws.onclose = () => {
             wsRef.current = null
-            if (liveModeRef.current) {
-                setTimeout(() => {
-                    if (liveModeRef.current) {
-                        setLiveMode(false)
-                        setTimeout(() => setLiveMode(true), 100)
-                    }
-                }, 3000)
-            }
+            // We do NOT attempt to self-heal liveMode here because it's globally managed now.
+            // Reconnection logic is handled centrally in LiveModeContext.
         }
 
         return () => {
@@ -181,29 +176,6 @@ export function LogExplorer() {
                         </Badge>
                     )}
                 </Group>
-                <Group gap="sm">
-                    {!liveMode && (
-                        <TimeRangeSelector
-                            value={tr.timeRange}
-                            onChange={tr.setTimeRange}
-                        />
-                    )}
-                    <Switch
-                        label="Live Stream"
-                        checked={liveMode}
-                        onChange={(e) => {
-                            const newMode = e.currentTarget.checked
-                            if (!newMode && wsRef.current) {
-                                wsRef.current.close()
-                                wsRef.current = null
-                            }
-                            setLiveMode(newMode)
-                        }}
-                        onLabel={<Play size={12} />}
-                        offLabel={<Pause size={12} />}
-                        size="md"
-                    />
-                </Group>
             </Group>
 
             {/* Filters */}
@@ -245,8 +217,10 @@ export function LogExplorer() {
             </Paper>
 
             {/* Log Table */}
-            <Paper shadow="xs" radius="md" withBorder style={{ overflow: 'hidden' }}>
-                <Group
+            <Paper shadow="xs" radius="md" withBorder style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+                <LoadingOverlay visible={isFetchingLogs && !liveMode} zIndex={1000} overlayProps={{ radius: 'sm', blur: 2 }} />
+
+                {/* List Header */}                  <Group
                     gap={0}
                     px="sm"
                     py={6}

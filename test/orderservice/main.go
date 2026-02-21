@@ -89,7 +89,16 @@ func handleOrder(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(latency)
 	}
 
-	// Call Payment Service (Service B)
+	// 1. Authenticate token
+	span.AddEvent("verifying_user", trace.WithAttributes(attribute.String("upstream", "auth-service")))
+	if err := callAuthService(ctx); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		http.Error(w, "Auth Failed: "+err.Error(), http.StatusUnauthorized)
+		return
+	}
+
+	// 2. Call Payment Service (Service B)
 	span.AddEvent("processing_payment", trace.WithAttributes(attribute.String("upstream", "payment-service")))
 	if err := callPaymentService(ctx); err != nil {
 		span.RecordError(err)
@@ -98,9 +107,44 @@ func handleOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 3. Dispatch Shipping
+	span.AddEvent("dispatching_shipment", trace.WithAttributes(attribute.String("upstream", "shipping-service")))
+	if err := callShippingService(ctx); err != nil {
+		span.RecordError(err)
+		span.AddEvent("shipping_delayed", trace.WithAttributes(attribute.String("warning", err.Error())))
+		// Continue anyway (soft failure map)
+	}
+
+	// 4. Send Notification
+	span.AddEvent("sending_notification", trace.WithAttributes(attribute.String("upstream", "notification-service")))
+	if err := callNotificationService(ctx); err != nil {
+		span.RecordError(err)
+		// Best effort, don't fail transaction
+	}
+
 	span.AddEvent("order_completed", trace.WithAttributes(attribute.String("status", "success")))
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Order Placed Successfully"))
+}
+
+func callAuthService(ctx context.Context) error {
+	client := http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "http://localhost:9004/validate", nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("auth service returned %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func callPaymentService(ctx context.Context) error {
@@ -119,6 +163,34 @@ func callPaymentService(ctx context.Context) error {
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("payment service returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func callShippingService(ctx context.Context) error {
+	client := http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}
+	req, _ := http.NewRequestWithContext(ctx, "POST", "http://localhost:9006/ship", nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("shipping failed: %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func callNotificationService(ctx context.Context) error {
+	client := http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}
+	req, _ := http.NewRequestWithContext(ctx, "POST", "http://localhost:9007/notify", nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("notification failed: %d", resp.StatusCode)
 	}
 	return nil
 }

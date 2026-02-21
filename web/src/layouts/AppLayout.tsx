@@ -25,6 +25,7 @@ import { ServiceMap } from '../features/topology/ServiceMap'
 import { SettingsPage } from '../features/settings/Settings'
 import { TraceExplorer } from '../features/traces/TraceExplorer'
 import { useLiveMode } from '../contexts/LiveModeContext'
+import { TimeRangeSelector, useTimeRange } from '../components/TimeRangeSelector'
 
 type PageKey = 'dashboard' | 'map' | 'logs' | 'traces' | 'settings'
 
@@ -39,6 +40,7 @@ const navItems: { key: PageKey; label: string; icon: typeof LayoutDashboard }[] 
 export function AppLayout() {
     const [active, setActive] = useFilterParamString('page', 'dashboard') as [PageKey, (v: string) => void]
     const { isLive, isConnected, setIsLive } = useLiveMode()
+    const tr = useTimeRange('5m')
 
     const renderPage = () => {
         switch (active) {
@@ -93,6 +95,16 @@ export function AppLayout() {
                         size="md"
                     />
                 </Box>
+
+                {/* Global Time Filter (Hidden during Live Mode) */}
+                {!isLive && (
+                    <Box mb="md" px="xs">
+                        <TimeRangeSelector
+                            value={tr.timeRange}
+                            onChange={tr.setTimeRange}
+                        />
+                    </Box>
+                )}
 
                 {/* Navigation */}
                 {navItems.map((item) => (

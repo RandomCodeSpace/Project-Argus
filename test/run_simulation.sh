@@ -14,12 +14,32 @@ echo "[1/4] Building test services..."
 go build -o ./tmp/orderservice ./test/orderservice
 go build -o ./tmp/paymentservice ./test/paymentservice
 go build -o ./tmp/inventoryservice ./test/inventoryservice
+go build -o ./tmp/authservice ./test/authservice
+go build -o ./tmp/userservice ./test/userservice
+go build -o ./tmp/shippingservice ./test/shippingservice
+go build -o ./tmp/notificationservice ./test/notificationservice
 echo "✅ All services built"
 
 # Start services in background
 echo "[2/4] Starting services..."
+./tmp/userservice &
+PID_USER=$!
+sleep 1
+
+./tmp/authservice &
+PID_AUTH=$!
+sleep 1
+
 ./tmp/inventoryservice &
 PID_INVENTORY=$!
+sleep 1
+
+./tmp/shippingservice &
+PID_SHIPPING=$!
+sleep 1
+
+./tmp/notificationservice &
+PID_NOTIFICATION=$!
 sleep 1
 
 ./tmp/paymentservice &
@@ -31,16 +51,20 @@ PID_ORDER=$!
 sleep 1
 
 echo "✅ All services started"
-echo "  📦 Inventory Service (PID: $PID_INVENTORY) → :9003"
-echo "  💳 Payment Service   (PID: $PID_PAYMENT)   → :9002"
-echo "  🛒 Order Service     (PID: $PID_ORDER)     → :9001"
+echo "  👤 User Service         (PID: $PID_USER)         → :9005"
+echo "  🔐 Auth Service         (PID: $PID_AUTH)         → :9004"
+echo "  📦 Inventory Service    (PID: $PID_INVENTORY)    → :9003"
+echo "  🚚 Shipping Service     (PID: $PID_SHIPPING)     → :9006"
+echo "  ✉️ Notification Service (PID: $PID_NOTIFICATION) → :9007"
+echo "  💳 Payment Service      (PID: $PID_PAYMENT)      → :9002"
+echo "  🛒 Order Service        (PID: $PID_ORDER)        → :9001"
 
 # Cleanup on exit
 cleanup() {
     echo ""
     echo "[4/4] Cleaning up..."
-    kill $PID_ORDER $PID_PAYMENT $PID_INVENTORY 2>/dev/null || true
-    rm -f ./tmp/orderservice ./tmp/paymentservice ./tmp/inventoryservice
+    kill $PID_ORDER $PID_PAYMENT $PID_INVENTORY $PID_AUTH $PID_USER $PID_SHIPPING $PID_NOTIFICATION 2>/dev/null || true
+    rm -f ./tmp/orderservice ./tmp/paymentservice ./tmp/inventoryservice ./tmp/authservice ./tmp/userservice ./tmp/shippingservice ./tmp/notificationservice
     echo "✅ All services stopped"
 }
 trap cleanup EXIT INT TERM
@@ -54,7 +78,7 @@ TOTAL=0
 SUCCESS=0
 FAILURE=0
 
-for i in $(seq 1 300); do
+while true; do
     STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:9001/order 2>/dev/null || echo "000")
     TOTAL=$((TOTAL + 1))
     

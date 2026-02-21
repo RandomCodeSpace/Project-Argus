@@ -90,6 +90,15 @@ func handlePay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 1. Double check auth (Simulating multi-step validation)
+	span.AddEvent("secondary_auth_check", trace.WithAttributes(attribute.String("upstream", "auth-service")))
+	if err := callAuthService(ctx); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		http.Error(w, "Auth Failed: "+err.Error(), http.StatusUnauthorized)
+		return
+	}
+
 	// Call Inventory Service (Service C) to verify stock
 	span.AddEvent("verifying_inventory")
 	if err := callInventoryService(ctx); err != nil {
@@ -126,6 +135,26 @@ func callInventoryService(ctx context.Context) error {
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("inventory service returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func callAuthService(ctx context.Context) error {
+	client := http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", "http://localhost:9004/validate", nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("auth service returned %d", resp.StatusCode)
 	}
 	return nil
 }
