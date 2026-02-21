@@ -25,9 +25,10 @@ import {
 import { CanvasRenderer } from 'echarts/renderers'
 import { Activity, AlertTriangle, Clock, Layers } from 'lucide-react'
 import type { TrafficPoint, ServiceError, DashboardStats } from '../../types'
-import { useTimeRange } from '../../components/TimeRangeSelector'
 import { useFilterParam } from '../../hooks/useFilterParams'
 import { useLiveMode } from '../../contexts/LiveModeContext'
+import { GlobalControls } from '../../components/GlobalControls'
+import { useTimeRange } from '../../components/TimeRangeSelector'
 
 echarts.use([
     LineChart, BarChart, HeatmapChart,
@@ -141,7 +142,8 @@ export function Dashboard() {
                         </Badge>
                     )}
                 </Group>
-                <Group gap="sm">
+                <Group gap="md">
+                    <GlobalControls />
                     <Select
                         size="xs"
                         data={[{ value: '', label: 'All Services' }, ...(services || []).map(s => ({ value: s, label: s }))]}

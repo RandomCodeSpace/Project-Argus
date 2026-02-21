@@ -20,6 +20,7 @@ import type { TraceResponse } from '../../types'
 import { useTimeRange } from '../../components/TimeRangeSelector'
 import { useFilterParam, useFilterParamString } from '../../hooks/useFilterParams'
 import { useLiveMode } from '../../contexts/LiveModeContext'
+import { GlobalControls } from '../../components/GlobalControls'
 
 const STATUS_COLORS: Record<string, string> = {
     OK: 'green',
@@ -108,6 +109,7 @@ export function TraceExplorer() {
                         <Badge variant="light" color="indigo">{data?.total ?? 0} total</Badge>
                     )}
                 </Group>
+                <GlobalControls />
             </Group>
 
             <Paper shadow="xs" p="sm" radius="md" withBorder>

@@ -22,6 +22,7 @@ import type { LogEntry, LogResponse } from '../../types'
 import { useTimeRange, TIME_RANGES } from '../../components/TimeRangeSelector'
 import { useFilterParam, useFilterParamString } from '../../hooks/useFilterParams'
 import { useLiveMode } from '../../contexts/LiveModeContext'
+import { GlobalControls } from '../../components/GlobalControls'
 
 const SEVERITY_COLORS: Record<string, string> = {
     ERROR: 'red',
@@ -176,6 +177,7 @@ export function LogExplorer() {
                         </Badge>
                     )}
                 </Group>
+                <GlobalControls />
             </Group>
 
             {/* Filters */}

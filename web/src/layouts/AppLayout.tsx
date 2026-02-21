@@ -7,7 +7,6 @@ import {
     Badge,
     Text,
     Box,
-    Switch,
 } from '@mantine/core'
 import {
     LayoutDashboard,
@@ -15,8 +14,6 @@ import {
     ScrollText,
     Activity,
     Settings,
-    Play,
-    Pause,
 } from 'lucide-react'
 
 import { Dashboard } from '../features/dashboard/Dashboard'
@@ -24,8 +21,7 @@ import { LogExplorer } from '../features/logs/LogExplorer'
 import { ServiceMap } from '../features/topology/ServiceMap'
 import { SettingsPage } from '../features/settings/Settings'
 import { TraceExplorer } from '../features/traces/TraceExplorer'
-import { useLiveMode } from '../contexts/LiveModeContext'
-import { TimeRangeSelector, useTimeRange } from '../components/TimeRangeSelector'
+
 
 type PageKey = 'dashboard' | 'map' | 'logs' | 'traces' | 'settings'
 
@@ -39,8 +35,6 @@ const navItems: { key: PageKey; label: string; icon: typeof LayoutDashboard }[] 
 
 export function AppLayout() {
     const [active, setActive] = useFilterParamString('page', 'dashboard') as [PageKey, (v: string) => void]
-    const { isLive, isConnected, setIsLive } = useLiveMode()
-    const tr = useTimeRange('5m')
 
     const renderPage = () => {
         switch (active) {
@@ -70,41 +64,6 @@ export function AppLayout() {
                         <Badge size="xs" variant="gradient" gradient={{ from: 'indigo', to: 'cyan' }}>{__APP_VERSION__}</Badge>
                     </Box>
                 </Group>
-
-                {/* Live Mode Toggle */}
-                <Box mb="md" px="xs">
-                    <Switch
-                        label={
-                            <Group gap={6}>
-                                <Text size="sm" c="var(--argus-sidebar-text)" fw={500}>Live Mode</Text>
-                                {isLive && (
-                                    <Badge
-                                        variant="dot"
-                                        color={isConnected ? 'green' : 'red'}
-                                        size="xs"
-                                    >
-                                        {isConnected ? 'ON' : '...'}
-                                    </Badge>
-                                )}
-                            </Group>
-                        }
-                        checked={isLive}
-                        onChange={(e) => setIsLive(e.currentTarget.checked)}
-                        onLabel={<Play size={12} />}
-                        offLabel={<Pause size={12} />}
-                        size="md"
-                    />
-                </Box>
-
-                {/* Global Time Filter (Hidden during Live Mode) */}
-                {!isLive && (
-                    <Box mb="md" px="xs">
-                        <TimeRangeSelector
-                            value={tr.timeRange}
-                            onChange={tr.setTimeRange}
-                        />
-                    </Box>
-                )}
 
                 {/* Navigation */}
                 {navItems.map((item) => (

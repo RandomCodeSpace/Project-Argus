@@ -20,6 +20,7 @@ import { Server, Globe } from 'lucide-react'
 import type { ServiceMapMetrics } from '../../types'
 import { useTimeRange } from '../../components/TimeRangeSelector'
 import { useLiveMode } from '../../contexts/LiveModeContext'
+import { GlobalControls } from '../../components/GlobalControls'
 
 const CustomServiceNode = ({ data }: { data: any }) => {
     const getGlowColor = (latency: number, errors: number) => {
@@ -209,6 +210,7 @@ export function ServiceMap() {
                         </Badge>
                     )}
                 </Group>
+                <GlobalControls />
             </Group>
 
             <Paper shadow="xs" radius="md" withBorder style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
