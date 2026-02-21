@@ -480,25 +480,36 @@ export function LogExplorer() {
                                                 </Group>
 
                                                 {context && (
-                                                    <Paper p="sm" radius="md" withBorder bg="white">
+                                                    <Box>
                                                         <Text size="xs" fw={700} mb="xs" c="dimmed">CONTEXT LOGS ({context.length})</Text>
                                                         {context.length === 0 ? (
                                                             <Text size="xs" c="dimmed">No context logs found within ±1 minute.</Text>
                                                         ) : (
-                                                            <Stack gap={2}>
-                                                                {context.map((l) => (
-                                                                    <Group key={l.id} gap="xs" py={4} style={{
-                                                                        borderBottom: '1px solid var(--mantine-color-gray-1)',
-                                                                        backgroundColor: l.id === log.id ? 'var(--mantine-color-yellow-1)' : 'transparent'
-                                                                    }}>
-                                                                        <Badge size="xs" color={SEVERITY_COLORS[l.severity] || 'gray'}>{l.severity}</Badge>
-                                                                        <Text size="xs" c="dimmed" ff="monospace">{new Date(l.timestamp).toLocaleTimeString()}</Text>
-                                                                        <Text size="xs" truncate style={{ flex: 1 }}>{l.body}</Text>
-                                                                    </Group>
-                                                                ))}
-                                                            </Stack>
+                                                            <Paper p="xs" radius="sm" bg="gray.9" withBorder style={{ maxHeight: 400, overflow: 'auto' }}>
+                                                                <Stack gap={2} style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', whiteSpace: 'pre-wrap' }}>
+                                                                    {context.map((l) => (
+                                                                        <Box
+                                                                            key={l.id}
+                                                                            style={{
+                                                                                color: l.id === log.id ? 'var(--mantine-color-yellow-4)' : 'var(--mantine-color-gray-3)',
+                                                                                backgroundColor: l.id === log.id ? 'rgba(255, 255, 0, 0.1)' : 'transparent',
+                                                                                padding: '2px 4px',
+                                                                                borderRadius: '2px'
+                                                                            }}
+                                                                        >
+                                                                            <span style={{ color: SEVERITY_COLORS[l.severity] ? `var(--mantine-color-${SEVERITY_COLORS[l.severity]}-5)` : 'inherit', fontWeight: 700 }}>
+                                                                                [{l.severity.padEnd(5)}]
+                                                                            </span>{' '}
+                                                                            <span style={{ color: 'var(--mantine-color-dimmed)' }}>
+                                                                                {new Date(l.timestamp).toLocaleTimeString()}
+                                                                            </span>{' '}
+                                                                            {l.body}
+                                                                        </Box>
+                                                                    ))}
+                                                                </Stack>
+                                                            </Paper>
                                                         )}
-                                                    </Paper>
+                                                    </Box>
                                                 )}
                                             </Stack>
                                         </Box>
