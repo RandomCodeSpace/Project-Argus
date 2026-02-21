@@ -1,15 +1,26 @@
-import { Group, Switch, Text, Badge, ActionIcon, Tooltip } from '@mantine/core'
+import { Group, Switch, Text, Badge, ActionIcon, Tooltip, Select } from '@mantine/core'
 import { Play, Pause, RefreshCw } from 'lucide-react'
 import { useLiveMode } from '../contexts/LiveModeContext'
 import { TimeRangeSelector, useTimeRange } from './TimeRangeSelector'
-import { useFilterParamString } from '../hooks/useFilterParams'
+import { useFilterParamString, useFilterParam } from '../hooks/useFilterParams'
+import { useQuery } from '@tanstack/react-query'
 
 export function GlobalControls() {
     const { isLive, setIsLive } = useLiveMode()
     const tr = useTimeRange('5m')
     const [page] = useFilterParamString('page', 'dashboard')
+    const [selectedService, setSelectedService] = useFilterParam('service', null)
+
     const isLiveSupported = page === 'dashboard' || page === 'map'
+    const isServiceFilterSupported = page === 'dashboard' || page === 'logs' || page === 'traces'
     const showHistoricalControls = !isLive || !isLiveSupported
+
+    const { data: services } = useQuery<string[]>({
+        queryKey: ['services'],
+        queryFn: () => fetch('/api/metadata/services').then(r => r.json()),
+        staleTime: 60000,
+        refetchOnWindowFocus: false,
+    })
 
     const formatDateTime = (startIso: string, endIso: string) => {
         const s = new Date(startIso)
@@ -37,7 +48,18 @@ export function GlobalControls() {
 
     return (
         <Group gap="md">
-            
+
+            {isServiceFilterSupported && (
+                <Select
+                    size="xs"
+                    placeholder="All Services"
+                    data={[{ value: '', label: 'All Services' }, ...(services || []).map(s => ({ value: s, label: s }))]}
+                    value={selectedService || ''}
+                    onChange={(v) => setSelectedService(v || null)}
+                    clearable
+                    styles={{ input: { width: 160 } }}
+                />
+            )}
             {showHistoricalControls && (
                 <Group gap="xs">
                     <Badge variant="light" color="gray" size="sm" style={{ fontFamily: 'var(--font-mono)', textTransform: 'none' }}>

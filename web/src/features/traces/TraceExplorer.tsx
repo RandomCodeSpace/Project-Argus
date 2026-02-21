@@ -7,7 +7,6 @@ import {
     Text,
     Badge,
     TextInput,
-    Select,
     Table,
     Pagination,
     Box,
@@ -44,10 +43,15 @@ export function TraceExplorer() {
 
     const [page, setPage] = useState(1)
     const [search, setSearch] = useFilterParamString('trace_q', '')
-    const [selectedService, setSelectedService] = useFilterParam('service', null)
+    const [selectedService] = useFilterParam('service', null)
     const [expandedTraces, setExpandedTraces] = useState<Set<number>>(new Set())
 
     const tr = useTimeRange('5m')
+
+    // Reset pagination when filter changes
+    useEffect(() => {
+        setPage(1)
+    }, [selectedService])
 
     // Calculate dynamic page size based on available height (Stabilized)
     useEffect(() => {
@@ -67,10 +71,6 @@ export function TraceExplorer() {
     }, [containerHeight, pageSize])
 
 
-    const { data: services } = useQuery<string[]>({
-        queryKey: ['services'],
-        queryFn: () => fetch('/api/metadata/services').then(r => r.json()),
-    })
 
     const tracesQueryKey = ['traces', page, search, selectedService, tr.start, tr.end, debouncedPageSize]
 
@@ -211,20 +211,11 @@ export function TraceExplorer() {
                 <Group gap="sm">
                     <TextInput
                         placeholder="Search traces..."
+                        size="xs"
                         leftSection={<Search size={14} />}
                         value={search}
                         onChange={(e) => { setSearch(e.currentTarget.value); setPage(1) }}
-                        style={{ flex: 1 }}
-                        size="xs"
-                    />
-                    <Select
-                        size="xs"
-                        placeholder="Service"
-                        data={[{ value: '', label: 'All Services' }, ...(services || []).map(s => ({ value: s, label: s }))]}
-                        value={selectedService || ''}
-                        onChange={(v) => { setSelectedService(v || null); setPage(1) }}
-                        clearable
-                        styles={{ input: { width: 160 } }}
+                        styles={{ input: { width: 200 } }}
                     />
                 </Group>
             </Paper>

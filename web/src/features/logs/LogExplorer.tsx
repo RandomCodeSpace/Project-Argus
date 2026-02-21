@@ -3,19 +3,19 @@ import {
     Paper,
     Group,
     Title,
-    Select,
     Stack,
-    TextInput,
-    Badge,
     Text,
-    Box,
-    Code,
-    Tooltip,
-    Button,
-    Collapse,
-    LoadingOverlay,
+    Badge,
+    TextInput,
+    Table,
     Pagination,
-    Table as MantineTable,
+    Box,
+    Tooltip,
+    LoadingOverlay,
+    Collapse,
+    Button,
+    Code,
+    Select,
 } from '@mantine/core'
 import { useElementSize, useDebouncedValue } from '@mantine/hooks'
 import {
@@ -53,34 +53,32 @@ const safeJsonParse = (json: string | null | undefined) => {
 }
 
 export function LogExplorer() {
-    // 1. Viewport & Sizing (Stabilized)
     const { ref: containerRef, height: containerHeight } = useElementSize()
     const [pageSize, setPageSize] = useState(25)
-    // Debounce resize updates to 1000ms to prevent jitter and excessive re-fetching
     const [debouncedPageSize] = useDebouncedValue(pageSize, 1000)
     const lastHeightRef = useRef(0)
 
     const [page, setPage] = useState(1)
-    const [selectedService, setSelectedService] = useFilterParam('service', null)
+    const [selectedService] = useFilterParam('service', null)
     const [selectedSeverity, setSelectedSeverity] = useFilterParam('severity', null)
     const [searchText, setSearchText] = useFilterParamString('log_q', '')
-    // Expanded state
     const [expandedLogs, setExpandedLogs] = useState<Set<number>>(new Set())
     const [contextMap, setContextMap] = useState<Map<number, LogEntry[]>>(new Map())
     const [loadingContext, setLoadingContext] = useState<Set<number>>(new Set())
 
     const tr = useTimeRange('5m')
 
-    // Reset page when switching modes - Removed
+    // Reset pagination when service filter changes
+    useEffect(() => {
+        setPage(1)
+    }, [selectedService])
 
     // Stabilized dynamic page size calculation
     useEffect(() => {
         if (containerHeight > 0) {
-            // Only recalculate if height changed significantly (> 20px)
             if (Math.abs(containerHeight - lastHeightRef.current) > 20) {
                 const headerHeight = 40
                 const rowHeight = 42
-                // Use Math.max/min to keep paging within sane bounds
                 const calculatedSize = Math.max(10, Math.floor((containerHeight - headerHeight) / rowHeight))
                 if (calculatedSize !== pageSize) {
                     setPageSize(calculatedSize)
@@ -90,16 +88,8 @@ export function LogExplorer() {
         }
     }, [containerHeight, pageSize])
 
-    const { data: services } = useQuery<string[]>({
-        queryKey: ['services'],
-        queryFn: () => fetch('/api/metadata/services').then(r => r.json()),
-        staleTime: 60000, // Services list doesn't change often
-        refetchOnWindowFocus: false,
-    })
-
-    // 3. Historical Data Fetching (Optimized)
+    // Historical Data Fetching
     const { data: historicalData, isFetching: isFetchingLogs } = useQuery<LogResponse>({
-        // Include debouncedPageSize in key to prevent intermediate renders during resize
         queryKey: ['logs', selectedService, selectedSeverity, searchText, tr.start, tr.end, page, debouncedPageSize],
         queryFn: async () => {
             const params = new URLSearchParams()
@@ -110,22 +100,18 @@ export function LogExplorer() {
             params.append('offset', String((page - 1) * debouncedPageSize))
             params.append('start', tr.start)
             params.append('end', tr.end)
-            const res = await fetch(`/api/logs?${params}`)
+            const res = await fetch(`/api/logs?${params.toString()}`)
             return res.json()
         },
-        enabled: true, // Always enabled as liveMode is removed
         staleTime: 30000,
         refetchOnWindowFocus: false,
     })
 
-
-    // 5. Intelligent Filtering Logic (Optimized)
-    // Only filter on client side for LIVE logs. Historical logs are already server-side filtered.
     const displayLogs = useMemo(() => {
         return (historicalData?.logs || historicalData?.data || [])
     }, [historicalData])
 
-    const totalCount = (historicalData?.total || 0) // Simplified
+    const totalCount = (historicalData?.total || 0)
     const totalPages = Math.ceil(totalCount / Math.max(1, debouncedPageSize))
 
     const toggleExpand = useCallback((id: number) => {
@@ -137,7 +123,24 @@ export function LogExplorer() {
         })
     }, [])
 
-    // 6. Memoized Column Definitions (Static)
+    const loadContext = async (log: LogEntry) => {
+        if (contextMap.has(log.id)) return
+        setLoadingContext(prev => new Set(prev).add(log.id))
+        try {
+            const res = await fetch(`/api/logs/context?trace_id=${log.trace_id}&timestamp=${log.timestamp}`)
+            const data = await res.json()
+            setContextMap(prev => new Map(prev).set(log.id, data))
+        } catch (err) {
+            console.error(err)
+        } finally {
+            setLoadingContext(prev => {
+                const next = new Set(prev)
+                next.delete(log.id)
+                return next
+            })
+        }
+    }
+
     const columns = useMemo(() => [
         columnHelper.display({
             id: 'expander',
@@ -193,14 +196,8 @@ export function LogExplorer() {
         }),
     ], [expandedLogs])
 
-    // 6. Pagination Logic
-    const paginatedLogs = useMemo(() => {
-        const start = (page - 1) * debouncedPageSize
-        return displayLogs.slice(start, start + debouncedPageSize)
-    }, [displayLogs, page, debouncedPageSize])
-
     const table = useReactTable({
-        data: paginatedLogs,
+        data: displayLogs,
         columns,
         getCoreRowModel: getCoreRowModel(),
     })
@@ -211,34 +208,14 @@ export function LogExplorer() {
         count: rows.length,
         getScrollElement: () => containerRef.current,
         estimateSize: () => 42,
-        overscan: 15, // Increased overscan for smoother high-speed scrolling
+        overscan: 10,
     })
-
-    const loadContext = async (log: LogEntry) => {
-        if (contextMap.has(log.id)) return
-        setLoadingContext(prev => new Set(prev).add(log.id))
-        try {
-            const res = await fetch(`/api/logs/context?trace_id=${log.trace_id}&timestamp=${log.timestamp}`)
-            const data = await res.json()
-            setContextMap(prev => new Map(prev).set(log.id, data))
-        } catch (err) {
-            console.error(err)
-        } finally {
-            setLoadingContext(prev => {
-                const next = new Set(prev)
-                next.delete(log.id)
-                return next
-            })
-        }
-    }
 
     return (
         <Stack gap="md" style={{ height: '100%', overflow: 'hidden' }}>
-            {/* Page Header */}
             <Group justify="space-between" px="xs">
                 <Group gap="sm">
                     <Title order={3}>Logs</Title>
-                    {/* Removed !liveMode condition */}
                     <Badge variant="light" color="indigo" size="lg">
                         {TIME_RANGES.find(r => r.value === tr.timeRange)?.label || tr.timeRange} • {totalCount} total
                     </Badge>
@@ -246,7 +223,6 @@ export function LogExplorer() {
                 <GlobalControls />
             </Group>
 
-            {/* Persistence Layer / Filters */}
             <Paper shadow="xs" p="sm" radius="md" withBorder mx="xs">
                 <Group gap="sm">
                     <TextInput
@@ -256,15 +232,6 @@ export function LogExplorer() {
                         onChange={(e) => { setSearchText(e.currentTarget.value); setPage(1) }}
                         style={{ flex: 1 }}
                         size="xs"
-                    />
-                    <Select
-                        size="xs"
-                        placeholder="Service"
-                        data={[{ value: '', label: 'All Services' }, ...(services || []).map(s => ({ value: s, label: s }))]}
-                        value={selectedService || ''}
-                        onChange={(v) => { setSelectedService(v || null); setPage(1) }}
-                        clearable
-                        styles={{ input: { width: 160 } }}
                     />
                     <Select
                         size="xs"
@@ -287,16 +254,15 @@ export function LogExplorer() {
             <Paper shadow="xs" radius="md" withBorder mx="xs" style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden' }}>
                 <LoadingOverlay visible={isFetchingLogs} zIndex={100} overlayProps={{ radius: 'sm', blur: 1 }} />
 
-                {/* Fixed Header */}
                 <Box bg="var(--mantine-color-gray-0)" style={{ borderBottom: '1px solid var(--mantine-color-gray-2)' }}>
-                    <MantineTable striped highlightOnHover withTableBorder={false}>
-                        <MantineTable.Thead>
+                    <Table striped highlightOnHover>
+                        <Table.Thead>
                             {table.getHeaderGroups().map(headerGroup => (
-                                <MantineTable.Tr key={headerGroup.id} style={{ display: 'flex' }}>
+                                <Table.Tr key={headerGroup.id} style={{ display: 'flex' }}>
                                     {headerGroup.headers.map(header => {
                                         const isBody = header.column.id === 'body'
                                         return (
-                                            <MantineTable.Th
+                                            <Table.Th
                                                 key={header.id}
                                                 style={{
                                                     width: isBody ? undefined : header.getSize(),
@@ -311,16 +277,15 @@ export function LogExplorer() {
                                                 <Text fw={700} size="xs" c="dimmed">
                                                     {flexRender(header.column.columnDef.header, header.getContext())}
                                                 </Text>
-                                            </MantineTable.Th>
+                                            </Table.Th>
                                         )
                                     })}
-                                </MantineTable.Tr>
+                                </Table.Tr>
                             ))}
-                        </MantineTable.Thead>
-                    </MantineTable>
+                        </Table.Thead>
+                    </Table>
                 </Box>
 
-                {/* Virtualized Scroll Area */}
                 <div
                     ref={containerRef}
                     style={{
@@ -375,7 +340,6 @@ export function LogExplorer() {
                                         })}
                                     </Group>
 
-                                    {/* Expansion Section */}
                                     <Collapse in={isExpanded}>
                                         <Box p="md" bg="var(--mantine-color-gray-0)" style={{ borderTop: '1px solid var(--mantine-color-gray-2)' }}>
                                             <Stack gap="sm">
@@ -422,33 +386,29 @@ export function LogExplorer() {
                                                 {context && (
                                                     <Box>
                                                         <Text size="xs" fw={700} mb="xs" c="dimmed">CONTEXT LOGS ({context.length})</Text>
-                                                        {context.length === 0 ? (
-                                                            <Text size="xs" c="dimmed">No context logs found within ±1 minute.</Text>
-                                                        ) : (
-                                                            <Paper p="xs" radius="sm" bg="gray.9" withBorder style={{ maxHeight: 400, overflow: 'auto' }}>
-                                                                <Stack gap={2} style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', whiteSpace: 'pre-wrap' }}>
-                                                                    {context.map((l) => (
-                                                                        <Box
-                                                                            key={l.id}
-                                                                            style={{
-                                                                                color: l.id === log.id ? 'var(--mantine-color-yellow-4)' : 'var(--mantine-color-gray-3)',
-                                                                                backgroundColor: l.id === log.id ? 'rgba(255, 255, 0, 0.1)' : 'transparent',
-                                                                                padding: '2px 4px',
-                                                                                borderRadius: '2px'
-                                                                            }}
-                                                                        >
-                                                                            <span style={{ color: SEVERITY_COLORS[l.severity] ? `var(--mantine-color-${SEVERITY_COLORS[l.severity]}-5)` : 'inherit', fontWeight: 700 }}>
-                                                                                [{l.severity.padEnd(5)}]
-                                                                            </span>{' '}
-                                                                            <span style={{ color: 'var(--mantine-color-dimmed)' }}>
-                                                                                {new Date(l.timestamp).toLocaleTimeString()}
-                                                                            </span>{' '}
-                                                                            {l.body}
-                                                                        </Box>
-                                                                    ))}
-                                                                </Stack>
-                                                            </Paper>
-                                                        )}
+                                                        <Paper p="xs" radius="sm" bg="gray.9" withBorder style={{ maxHeight: 400, overflow: 'auto' }}>
+                                                            <Stack gap={2} style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', whiteSpace: 'pre-wrap' }}>
+                                                                {context.map((l) => (
+                                                                    <Box
+                                                                        key={l.id}
+                                                                        style={{
+                                                                            color: l.id === log.id ? 'var(--mantine-color-yellow-4)' : 'var(--mantine-color-gray-3)',
+                                                                            backgroundColor: l.id === log.id ? 'rgba(255, 255, 0, 0.1)' : 'transparent',
+                                                                            padding: '2px 4px',
+                                                                            borderRadius: '2px'
+                                                                        }}
+                                                                    >
+                                                                        <span style={{ color: SEVERITY_COLORS[l.severity] ? `var(--mantine-color-${SEVERITY_COLORS[l.severity]}-5)` : 'inherit', fontWeight: 700 }}>
+                                                                            [{l.severity.padEnd(5)}]
+                                                                        </span>{' '}
+                                                                        <span style={{ color: 'var(--mantine-color-dimmed)' }}>
+                                                                            {new Date(l.timestamp).toLocaleTimeString()}
+                                                                        </span>{' '}
+                                                                        {l.body}
+                                                                    </Box>
+                                                                ))}
+                                                            </Stack>
+                                                        </Paper>
                                                     </Box>
                                                 )}
                                             </Stack>
@@ -460,18 +420,11 @@ export function LogExplorer() {
                     </div>
                 </div>
 
-                {/* Unified Footer - Locked height for stability */}
                 <Box p="xs" bg="var(--mantine-color-gray-0)" style={{ borderTop: '1px solid var(--mantine-color-gray-2)', height: 48, display: 'flex', alignItems: 'center' }}>
-                    <Group justify="space-between" px="md" style={{ flex: 1 }}>
-                        <Box style={{ flex: 1 }} />
-
+                    <Group justify="center" px="md" style={{ flex: 1 }}>
                         {totalPages > 1 && (
-                            <Group justify="center" style={{ flex: 2 }}>
-                                <Pagination total={totalPages} value={page} onChange={setPage} size="sm" />
-                            </Group>
+                            <Pagination total={totalPages} value={page} onChange={setPage} size="sm" />
                         )}
-
-                        <Box style={{ flex: 1 }} />
                     </Group>
                 </Box>
             </Paper>

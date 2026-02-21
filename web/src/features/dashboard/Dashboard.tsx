@@ -1,9 +1,8 @@
-import { useMemo, useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import {
     Paper,
     Group,
     Title,
-    Select,
     Stack,
     SimpleGrid,
     Text,
@@ -38,7 +37,7 @@ echarts.use([
 
 export function Dashboard() {
     const tr = useTimeRange('15m')
-    const [selectedService, setSelectedService] = useFilterParam('service', null)
+    const [selectedService] = useFilterParam('service', null)
     const { isLive, isConnected, setServiceFilter } = useLiveMode()
 
     // Sync local filter param to global live mode filter
@@ -47,11 +46,6 @@ export function Dashboard() {
             setServiceFilter(selectedService || '')
         }
     }, [isLive, selectedService, setServiceFilter])
-
-    const { data: services } = useQuery<string[]>({
-        queryKey: ['services'],
-        queryFn: () => fetch('/api/metadata/services').then(r => r.json()),
-    })
 
     const serviceParams = selectedService ? `&service_name=${encodeURIComponent(selectedService)}` : ''
 
@@ -145,16 +139,6 @@ export function Dashboard() {
                     )}
                 </Group>
                 <Group gap="md">
-                    
-                    <Select
-                        size="xs"
-                        data={[{ value: '', label: 'All Services' }, ...(services || []).map(s => ({ value: s, label: s }))]}
-                        value={selectedService || ''}
-                        onChange={(v) => setSelectedService(v || null)}
-                        placeholder="Filter by service"
-                        clearable
-                        styles={{ input: { width: 180 } }}
-                    />
                     <GlobalControls />
                 </Group>
             </Group>
