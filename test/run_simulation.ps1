@@ -114,7 +114,7 @@ try {
             $failure += ($results | Where-Object { $_ -eq "FAIL" }).Count
             $total += $results.Count
 
-            Write-Host "  Progress: $total requests | OK: $success | FAIL: $failure" -ForegroundColor Cyan
+            Write-Host "Parallel Progress: $total requests | OK: $success | FAIL: $failure" -ForegroundColor Cyan
         }
     }
     else {
@@ -136,9 +136,6 @@ try {
             if ($total % 30 -eq 0) {
                 Write-Host "  Progress: $total requests | OK: $success | FAIL: $failure" -ForegroundColor Cyan
             }
-            
-            # Small delay only in sequential mode to avoid flooding if requested
-            Start-Sleep -Milliseconds 50
         }
     }
 }

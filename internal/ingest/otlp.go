@@ -159,9 +159,9 @@ func (s *TraceServer) Export(ctx context.Context, req *coltracepb.ExportTraceSer
 						TraceID:        fmt.Sprintf("%x", span.TraceId),
 						SpanID:         fmt.Sprintf("%x", span.SpanId),
 						Severity:       severity,
-						Body:           body,
+						Body:           storage.CompressedText(body),
 						ServiceName:    serviceName,
-						AttributesJSON: string(eventAttrs),
+						AttributesJSON: storage.CompressedText(eventAttrs),
 						Timestamp:      time.Unix(0, int64(event.TimeUnixNano)),
 					}
 					synthesizedLogs = append(synthesizedLogs, l)
@@ -189,7 +189,7 @@ func (s *TraceServer) Export(ctx context.Context, req *coltracepb.ExportTraceSer
 							TraceID:        fmt.Sprintf("%x", span.TraceId),
 							SpanID:         fmt.Sprintf("%x", span.SpanId),
 							Severity:       "ERROR",
-							Body:           msg,
+							Body:           storage.CompressedText(msg),
 							ServiceName:    serviceName,
 							AttributesJSON: "{}", // Could copy span attributes
 							Timestamp:      endTime,
@@ -296,9 +296,9 @@ func (s *LogsServer) Export(ctx context.Context, req *collogspb.ExportLogsServic
 					TraceID:        fmt.Sprintf("%x", l.TraceId),
 					SpanID:         fmt.Sprintf("%x", l.SpanId),
 					Severity:       severity,
-					Body:           bodyStr,
+					Body:           storage.CompressedText(bodyStr),
 					ServiceName:    serviceName,
-					AttributesJSON: string(attrs),
+					AttributesJSON: storage.CompressedText(attrs),
 					Timestamp:      timestamp,
 				}
 

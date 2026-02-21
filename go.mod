@@ -7,6 +7,7 @@ require (
 	github.com/glebarez/sqlite v1.11.0
 	github.com/go-sql-driver/mysql v1.8.1
 	github.com/joho/godotenv v1.5.1
+	github.com/klauspost/compress v1.18.4
 	github.com/microsoft/go-mssqldb v1.8.2
 	github.com/prometheus/client_golang v1.23.2
 	github.com/tmc/langchaingo v0.1.14

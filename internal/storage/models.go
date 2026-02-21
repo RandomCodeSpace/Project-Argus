@@ -1,10 +1,67 @@
 package storage
 
 import (
+	"database/sql/driver"
+	"fmt"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"gorm.io/gorm"
 )
+
+// CompressedText is a string type that is transparently compressed using zstd before being stored in the database.
+// It implements sql.Scanner and driver.Valuer for GORM.
+type CompressedText string
+
+var (
+	encoder, _ = zstd.NewWriter(nil)
+	decoder, _ = zstd.NewReader(nil)
+)
+
+const zstdMagic = "\x28\xb5\x2f\xfd" // Zstd magic number (little-endian)
+
+func (ct CompressedText) Value() (driver.Value, error) {
+	if ct == "" {
+		return "", nil
+	}
+	compressed := encoder.EncodeAll([]byte(ct), nil)
+	// Prepend magic header to identify compressed data
+	return append([]byte(zstdMagic), compressed...), nil
+}
+
+func (ct *CompressedText) Scan(value interface{}) error {
+	if value == nil {
+		*ct = ""
+		return nil
+	}
+
+	bytes, ok := value.([]byte)
+	if !ok {
+		str, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("failed to scan CompressedText: invalid type %T", value)
+		}
+		bytes = []byte(str)
+	}
+
+	if len(bytes) == 0 {
+		*ct = ""
+		return nil
+	}
+
+	// Check for zstd magic header
+	if len(bytes) > 4 && string(bytes[:4]) == zstdMagic {
+		decompressed, err := decoder.DecodeAll(bytes[4:], nil)
+		if err != nil {
+			return fmt.Errorf("failed to decompress zstd data: %w", err)
+		}
+		*ct = CompressedText(decompressed)
+	} else {
+		// Legacy uncompressed data
+		*ct = CompressedText(bytes)
+	}
+	return nil
+}
 
 // Trace represents a complete distributed trace.
 type Trace struct {
@@ -40,13 +97,13 @@ type Span struct {
 
 // Log represents a log entry associated with a trace.
 type Log struct {
-	ID             uint      `gorm:"primaryKey" json:"id"`
-	TraceID        string    `gorm:"index;size:32" json:"trace_id"`
-	SpanID         string    `gorm:"size:16" json:"span_id"`
-	Severity       string    `gorm:"size:50;index" json:"severity"`
-	Body           string    `gorm:"type:text" json:"body"`
-	ServiceName    string    `gorm:"size:255;index" json:"service_name"`
-	AttributesJSON string    `gorm:"type:text" json:"attributes_json"`
-	AIInsight      string    `gorm:"type:text" json:"ai_insight"` // Populated by AI analysis
-	Timestamp      time.Time `gorm:"index" json:"timestamp"`
+	ID             uint           `gorm:"primaryKey" json:"id"`
+	TraceID        string         `gorm:"index;size:32" json:"trace_id"`
+	SpanID         string         `gorm:"size:16" json:"span_id"`
+	Severity       string         `gorm:"size:50;index" json:"severity"`
+	Body           CompressedText `gorm:"type:blob" json:"body"`
+	ServiceName    string         `gorm:"size:255;index" json:"service_name"`
+	AttributesJSON CompressedText `gorm:"type:blob" json:"attributes_json"`
+	AIInsight      CompressedText `gorm:"type:blob" json:"ai_insight"` // Populated by AI analysis
+	Timestamp      time.Time      `gorm:"index" json:"timestamp"`
 }

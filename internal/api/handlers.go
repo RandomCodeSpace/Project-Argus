@@ -58,10 +58,10 @@ func (s *Server) BroadcastLog(l storage.Log) {
 		TraceID:        l.TraceID,
 		SpanID:         l.SpanID,
 		Severity:       l.Severity,
-		Body:           l.Body,
+		Body:           string(l.Body),
 		ServiceName:    l.ServiceName,
-		AttributesJSON: l.AttributesJSON,
-		AIInsight:      l.AIInsight,
+		AttributesJSON: string(l.AttributesJSON),
+		AIInsight:      string(l.AIInsight),
 		Timestamp:      l.Timestamp,
 	})
 }
@@ -159,7 +159,7 @@ func (s *Server) handleGetLogInsight(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"insight": l.AIInsight})
+	json.NewEncoder(w).Encode(map[string]string{"insight": string(l.AIInsight)})
 }
 
 func (s *Server) handlePurge(w http.ResponseWriter, r *http.Request) {
