@@ -10,7 +10,7 @@ require (
 	github.com/microsoft/go-mssqldb v1.8.2
 	github.com/prometheus/client_golang v1.23.2
 	github.com/tmc/langchaingo v0.1.14
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.65.0
 	go.opentelemetry.io/otel v1.40.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.20.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.20.0
