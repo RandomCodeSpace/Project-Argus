@@ -79,6 +79,11 @@ export function LogExplorer() {
 
     const tr = useTimeRange('5m')
 
+    // Reset page when switching modes
+    useEffect(() => {
+        setPage(1)
+    }, [liveMode])
+
     // Stabilized dynamic page size calculation
     useEffect(() => {
         if (containerHeight > 0) {
@@ -145,7 +150,7 @@ export function LogExplorer() {
                 const data = JSON.parse(event.data)
                 // DEFENSIVE: Batch logs into buffer instead of immediate state update
                 if (Array.isArray(data)) {
-                    liveLogBuffer.current = [...data, ...liveLogBuffer.current].slice(0, 2000)
+                    liveLogBuffer.current = [...data, ...liveLogBuffer.current].slice(0, 50)
                 }
             } catch (err) {
                 console.warn('WS Refreshing: Non-iterable data or heartbeat received')
@@ -259,8 +264,18 @@ export function LogExplorer() {
         }),
     ], [expandedLogs])
 
+    // 6. Logic for Live Mode (Full Scroll, No Pagination)
+    const paginatedLogs = useMemo(() => {
+        if (!liveMode) {
+            const start = (page - 1) * debouncedPageSize
+            return displayLogs.slice(start, start + debouncedPageSize)
+        }
+        // In Live Mode, show full buffer (max 50) for "full scroll" feel
+        return displayLogs
+    }, [liveMode, displayLogs, page, debouncedPageSize])
+
     const table = useReactTable({
-        data: displayLogs,
+        data: paginatedLogs,
         columns,
         getCoreRowModel: getCoreRowModel(),
     })
@@ -298,11 +313,7 @@ export function LogExplorer() {
             <Group justify="space-between" px="xs">
                 <Group gap="sm">
                     <Title order={3}>Logs</Title>
-                    {liveMode ? (
-                        <Badge variant="dot" color="green" size="lg">
-                            LIVE • {liveLogs.length} logs
-                        </Badge>
-                    ) : (
+                    {!liveMode && (
                         <Badge variant="light" color="indigo" size="lg">
                             {TIME_RANGES.find(r => r.value === tr.timeRange)?.label || tr.timeRange} • {totalCount} total
                         </Badge>
@@ -528,18 +539,24 @@ export function LogExplorer() {
 
                 {/* Unified Footer - Locked height for stability */}
                 <Box p="xs" bg="var(--mantine-color-gray-0)" style={{ borderTop: '1px solid var(--mantine-color-gray-2)', height: 48, display: 'flex', alignItems: 'center' }}>
-                    {liveMode ? (
-                        <Group justify="space-between" px="md" style={{ flex: 1 }}>
-                            <Text size="xs" fw={500} c="dimmed">Live Buffer: {liveLogs.length}/2000 logs</Text>
-                            <Badge variant="dot" color="green" size="sm">RECEIVING DATA</Badge>
-                        </Group>
-                    ) : (
-                        totalPages > 1 && (
-                            <Group justify="center" style={{ flex: 1 }}>
+                    <Group justify="space-between" px="md" style={{ flex: 1 }}>
+                        <Box style={{ flex: 1 }}>
+                            {liveMode && (
+                                <Group gap="xs">
+                                    <Text size="xs" fw={500} c="dimmed">Live Buffer: {liveLogs.length}/50 logs</Text>
+                                    <Badge variant="dot" color="green" size="sm">RECEIVING DATA</Badge>
+                                </Group>
+                            )}
+                        </Box>
+
+                        {!liveMode && totalPages > 1 && (
+                            <Group justify="center" style={{ flex: 2 }}>
                                 <Pagination total={totalPages} value={page} onChange={setPage} size="sm" />
                             </Group>
-                        )
-                    )}
+                        )}
+
+                        <Box style={{ flex: 1 }} />
+                    </Group>
                 </Box>
             </Paper>
         </Stack>

@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Group, Select } from '@mantine/core'
 import { useFilterParam } from '../hooks/useFilterParams'
+import { useLiveMode } from '../contexts/LiveModeContext'
 
 export const TIME_RANGES = [
     { value: '5m', label: 'Last 5 min' },
@@ -57,7 +58,7 @@ export function useTimeRange(defaultRange = '5m') {
     const [rangeParam, setRangeParam] = useFilterParam('range', null)
     const [fromParam, setFromParam] = useFilterParam('from', null)
     const [toParam, setToParam] = useFilterParam('to', null)
-    const [refreshTrigger, setRefreshTrigger] = useState(0)
+    const { refreshTrigger, refresh } = useLiveMode()
 
     // Helper to clear discrete params when setting a range
     const setTimeRange = (val: string) => {
@@ -91,7 +92,7 @@ export function useTimeRange(defaultRange = '5m') {
         setTimeRange,
         start,
         end,
-        refresh: () => setRefreshTrigger(prev => prev + 1),
+        refresh,
         setCustomRange: (s: string, e: string) => {
             setRangeParam(null)
             setFromParam(s)

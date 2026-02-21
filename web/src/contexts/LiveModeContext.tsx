@@ -17,6 +17,8 @@ interface LiveModeContextValue {
     setIsLive: (live: boolean) => void
     serviceFilter: string
     setServiceFilter: (service: string) => void
+    refreshTrigger: number
+    refresh: () => void
 }
 
 const LiveModeContext = createContext<LiveModeContextValue>({
@@ -25,6 +27,8 @@ const LiveModeContext = createContext<LiveModeContextValue>({
     setIsLive: () => { },
     serviceFilter: '',
     setServiceFilter: () => { },
+    refreshTrigger: 0,
+    refresh: () => { },
 })
 
 /**
@@ -40,6 +44,7 @@ export function LiveModeProvider({ children }: { children: ReactNode }) {
 
     const [isConnected, setIsConnected] = useState(false)
     const [serviceFilter, setServiceFilterState] = useState('')
+    const [refreshTrigger, setRefreshTrigger] = useState(0)
     const wsRef = useRef<WebSocket | null>(null)
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const isLiveRef = useRef(isLive)
@@ -75,7 +80,12 @@ export function LiveModeProvider({ children }: { children: ReactNode }) {
         }
 
         if (snapshot.traces) {
-            queryClient.setQueryData(['live', 'traces'], snapshot.traces)
+            const limitedTraces = {
+                ...snapshot.traces,
+                traces: snapshot.traces.traces.slice(0, 50),
+                total: Math.min(snapshot.traces.total, 50)
+            }
+            queryClient.setQueryData(['live', 'traces'], limitedTraces)
         }
 
         if (snapshot.service_map) {
@@ -157,7 +167,15 @@ export function LiveModeProvider({ children }: { children: ReactNode }) {
     }, [isLive, connect, cleanup])
 
     return (
-        <LiveModeContext.Provider value={{ isLive, isConnected, setIsLive, serviceFilter, setServiceFilter }}>
+        <LiveModeContext.Provider value={{
+            isLive,
+            isConnected,
+            setIsLive,
+            serviceFilter,
+            setServiceFilter,
+            refreshTrigger,
+            refresh: () => setRefreshTrigger(prev => prev + 1)
+        }}>
             {children}
         </LiveModeContext.Provider>
     )

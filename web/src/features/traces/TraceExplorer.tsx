@@ -49,7 +49,7 @@ export function TraceExplorer() {
     const [expandedTraces, setExpandedTraces] = useState<Set<number>>(new Set())
 
     const tr = useTimeRange('5m')
-    const { isLive, isConnected, setServiceFilter } = useLiveMode()
+    const { isLive, setServiceFilter } = useLiveMode()
 
     // Calculate dynamic page size based on available height (Stabilized)
     useEffect(() => {
@@ -211,11 +211,7 @@ export function TraceExplorer() {
             <Group justify="space-between">
                 <Group gap="sm">
                     <Title order={3}>Traces</Title>
-                    {isLive ? (
-                        <Badge variant="dot" color={isConnected ? 'green' : 'red'} size="lg">
-                            {isConnected ? 'LIVE' : 'Reconnecting...'} • {data?.total ?? 0} total
-                        </Badge>
-                    ) : (
+                    {!isLive && (
                         <Badge variant="light" color="indigo">{data?.total ?? 0} total</Badge>
                     )}
                 </Group>
@@ -331,9 +327,9 @@ export function TraceExplorer() {
                     </Table>
                 </Box>
 
-                {/* Footer - Fixed height to keep layout stable during pagination toggles */}
+                {/* Footer - Fixed height to keep layout stable during mode toggles */}
                 <Box p="xs" style={{ borderTop: '1px solid var(--mantine-color-gray-2)', height: 48, display: 'flex', alignItems: 'center' }}>
-                    {totalPages > 1 && (
+                    {!isLive && totalPages > 1 && (
                         <Group justify="center" style={{ flex: 1 }}>
                             <Pagination total={totalPages} value={page} onChange={setPage} size="sm" />
                         </Group>
