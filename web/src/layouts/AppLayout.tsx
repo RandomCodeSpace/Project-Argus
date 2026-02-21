@@ -95,7 +95,11 @@ export function AppLayout() {
                 </Box>
             </AppShell.Navbar>
 
-            <AppShell.Main>{renderPage()}</AppShell.Main>
+            <AppShell.Main style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+                <Box style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                    {renderPage()}
+                </Box>
+            </AppShell.Main>
         </AppShell>
     )
 }

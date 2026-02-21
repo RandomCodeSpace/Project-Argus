@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import {
     Paper,
     Group,
@@ -14,9 +14,16 @@ import {
     Tooltip,
     LoadingOverlay,
 } from '@mantine/core'
+import { useElementSize, useDebouncedValue } from '@mantine/hooks'
+import {
+    useReactTable,
+    getCoreRowModel,
+    flexRender,
+    createColumnHelper,
+} from '@tanstack/react-table'
 import { useQuery } from '@tanstack/react-query'
-import { Search, Clock } from 'lucide-react'
-import type { TraceResponse } from '../../types'
+import { Search, Clock, ChevronRight, ChevronDown } from 'lucide-react'
+import type { TraceResponse, Trace, Span } from '../../types'
 import { useTimeRange } from '../../components/TimeRangeSelector'
 import { useFilterParam, useFilterParamString } from '../../hooks/useFilterParams'
 import { useLiveMode } from '../../contexts/LiveModeContext'
@@ -28,15 +35,32 @@ const STATUS_COLORS: Record<string, string> = {
     UNSET: 'gray',
 }
 
+const columnHelper = createColumnHelper<Trace>()
+
 export function TraceExplorer() {
+    const { ref: containerRef, height: containerHeight } = useElementSize()
+    const [pageSize, setPageSize] = useState(25)
+    const [debouncedPageSize] = useDebouncedValue(pageSize, 300)
+
     const [page, setPage] = useState(1)
     const [search, setSearch] = useFilterParamString('trace_q', '')
     const [selectedService, setSelectedService] = useFilterParam('service', null)
     const [expandedTraces, setExpandedTraces] = useState<Set<number>>(new Set())
 
-    const pageSize = 25
     const tr = useTimeRange('5m')
     const { isLive, isConnected, setServiceFilter } = useLiveMode()
+
+    // Calculate dynamic page size based on available height
+    useEffect(() => {
+        if (containerHeight > 0) {
+            const headerHeight = 40
+            const rowHeight = 40
+            const calculatedSize = Math.max(10, Math.floor((containerHeight - headerHeight) / rowHeight))
+            if (calculatedSize !== pageSize) {
+                setPageSize(calculatedSize)
+            }
+        }
+    }, [containerHeight, pageSize])
 
     // Sync local filter param to global live mode filter
     useEffect(() => {
@@ -50,15 +74,15 @@ export function TraceExplorer() {
         queryFn: () => fetch('/api/metadata/services').then(r => r.json()),
     })
 
-    const tracesQueryKey = isLive ? ['live', 'traces'] : ['traces', page, search, selectedService, tr.start, tr.end]
+    const tracesQueryKey = isLive ? ['live', 'traces'] : ['traces', page, search, selectedService, tr.start, tr.end, debouncedPageSize]
 
     // Traces data
     const { data, isLoading, isFetching } = useQuery<TraceResponse>({
         queryKey: tracesQueryKey,
         queryFn: () => {
             const params = new URLSearchParams()
-            params.append('limit', String(pageSize))
-            params.append('offset', String((page - 1) * pageSize))
+            params.append('limit', String(debouncedPageSize))
+            params.append('offset', String((page - 1) * debouncedPageSize))
             if (search) params.append('search', search)
             if (selectedService) params.append('service_name', selectedService)
             params.append('start', tr.start)
@@ -70,7 +94,7 @@ export function TraceExplorer() {
     })
 
     const traces = data?.traces || []
-    const totalPages = Math.ceil((data?.total || 0) / pageSize)
+    const totalPages = Math.ceil((data?.total || 0) / debouncedPageSize)
 
     const toggleTrace = (id: number) => {
         const next = new Set(expandedTraces)
@@ -96,8 +120,87 @@ export function TraceExplorer() {
         window.dispatchEvent(new Event('argus:urlchange'))
     }
 
+    const columns = useMemo(() => [
+        columnHelper.display({
+            id: 'expander',
+            header: () => null,
+            cell: ({ row }) => (
+                <Box
+                    style={{ cursor: 'pointer' }}
+                    onClick={(e) => {
+                        e.stopPropagation()
+                        toggleTrace(row.original.id)
+                    }}
+                >
+                    {expandedTraces.has(row.original.id) ? (
+                        <ChevronDown size={14} color="var(--mantine-color-dimmed)" />
+                    ) : (
+                        <ChevronRight size={14} color="var(--mantine-color-dimmed)" />
+                    )}
+                </Box>
+            ),
+            size: 40,
+        }),
+        columnHelper.accessor('trace_id', {
+            header: 'Trace ID',
+            cell: (info) => (
+                <Tooltip label="Click to view logs for this trace">
+                    <Text
+                        size="xs"
+                        ff="var(--font-mono)"
+                        style={{ fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}
+                        component="span"
+                        c="blue"
+                        onClick={() => navigateToLogs(info.getValue(), info.row.original.timestamp)}
+                    >
+                        {info.getValue()?.substring(0, 16)}...
+                    </Text>
+                </Tooltip>
+            ),
+        }),
+        columnHelper.accessor('service_name', {
+            header: 'Service',
+            cell: (info) => <Text size="sm" fw={500}>{info.getValue()}</Text>,
+        }),
+        columnHelper.accessor('operation', {
+            header: 'Operation',
+            cell: (info) => <Text size="sm">{info.getValue() || '—'}</Text>,
+        }),
+        columnHelper.accessor('duration_ms', {
+            header: 'Duration',
+            cell: (info) => (
+                <Group gap={4}>
+                    <Clock size={12} color="#868e96" />
+                    <Text size="sm">{info.getValue() !== undefined ? info.getValue().toFixed(1) : '0.0'}ms</Text>
+                </Group>
+            ),
+        }),
+        columnHelper.accessor('status', {
+            header: 'Status',
+            cell: (info) => (
+                <Badge size="xs" color={STATUS_COLORS[info.getValue()] || 'gray'}>
+                    {info.getValue() || 'UNSET'}
+                </Badge>
+            ),
+        }),
+        columnHelper.accessor('span_count', {
+            header: 'Spans',
+            cell: (info) => <Badge size="xs" variant="light">{info.getValue() ?? 0}</Badge>,
+        }),
+        columnHelper.accessor('timestamp', {
+            header: 'Timestamp',
+            cell: (info) => <Text size="xs" c="dimmed">{new Date(info.getValue()).toLocaleString()}</Text>,
+        }),
+    ], [expandedTraces])
+
+    const table = useReactTable({
+        data: traces,
+        columns,
+        getCoreRowModel: getCoreRowModel(),
+    })
+
     return (
-        <Stack gap="md">
+        <Stack gap="md" style={{ height: '100%' }}>
             <Group justify="space-between">
                 <Group gap="sm">
                     <Title order={3}>Traces</Title>
@@ -137,120 +240,88 @@ export function TraceExplorer() {
             <Paper shadow="xs" radius="md" withBorder style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
                 <LoadingOverlay visible={isFetching && !isLive} zIndex={1000} overlayProps={{ radius: 'sm', blur: 2 }} />
 
-                <Box style={{ flex: 1, overflow: 'auto' }}>
+                <Box ref={containerRef} style={{ flex: 1, overflow: 'auto' }}>
                     <Table striped highlightOnHover>
                         <Table.Thead>
-                            <Table.Tr>
-                                <Table.Th style={{ width: 40 }}></Table.Th>
-                                <Table.Th>Trace ID</Table.Th>
-                                <Table.Th>Service</Table.Th>
-                                <Table.Th>Operation</Table.Th>
-                                <Table.Th>Duration</Table.Th>
-                                <Table.Th>Status</Table.Th>
-                                <Table.Th>Spans</Table.Th>
-                                <Table.Th>Timestamp</Table.Th>
-                            </Table.Tr>
+                            {table.getHeaderGroups().map(headerGroup => (
+                                <Table.Tr key={headerGroup.id}>
+                                    {headerGroup.headers.map(header => (
+                                        <Table.Th key={header.id} style={{ width: header.getSize() }}>
+                                            {header.isPlaceholder
+                                                ? null
+                                                : flexRender(
+                                                    header.column.columnDef.header,
+                                                    header.getContext()
+                                                )}
+                                        </Table.Th>
+                                    ))}
+                                </Table.Tr>
+                            ))}
                         </Table.Thead>
                         <Table.Tbody>
                             {isLoading && !isLive ? (
                                 <Table.Tr>
-                                    <Table.Td colSpan={8}>
+                                    <Table.Td colSpan={columns.length}>
                                         <Text c="dimmed" ta="center" py="md">Loading traces...</Text>
                                     </Table.Td>
                                 </Table.Tr>
                             ) : traces.length === 0 ? (
                                 <Table.Tr>
-                                    <Table.Td colSpan={8}>
+                                    <Table.Td colSpan={columns.length}>
                                         <Text c="dimmed" ta="center" py="md">{isLive ? 'Waiting for live data...' : 'No traces found'}</Text>
                                     </Table.Td>
                                 </Table.Tr>
-                            ) : traces.map((trace) => {
-                                const isExpanded = expandedTraces.has(trace.id)
-                                return (
-                                    <React.Fragment key={trace.id}>
+                            ) : table.getRowModel().rows.map(row => (
+                                <React.Fragment key={row.id}>
+                                    <Table.Tr>
+                                        {row.getVisibleCells().map(cell => (
+                                            <Table.Td key={cell.id}>
+                                                {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                                            </Table.Td>
+                                        ))}
+                                    </Table.Tr>
+                                    {expandedTraces.has(row.original.id) && (
                                         <Table.Tr>
-                                            <Table.Td style={{ cursor: 'pointer' }} onClick={() => toggleTrace(trace.id)}>
-                                                <Text size="xs" c="dimmed">{isExpanded ? '▼' : '▶'}</Text>
-                                            </Table.Td>
-                                            <Table.Td>
-                                                <Tooltip label="Click to view logs for this trace">
-                                                    <Text
-                                                        size="xs"
-                                                        ff="var(--font-mono)"
-                                                        style={{ fontSize: 11, cursor: 'pointer', textDecoration: 'underline' }}
-                                                        component="span"
-                                                        c="blue"
-                                                        onClick={() => navigateToLogs(trace.trace_id, trace.timestamp)}
-                                                    >
-                                                        {trace.trace_id?.substring(0, 16)}...
-                                                    </Text>
-                                                </Tooltip>
-                                            </Table.Td>
-                                            <Table.Td>
-                                                <Text size="sm" fw={500}>{trace.service_name}</Text>
-                                            </Table.Td>
-                                            <Table.Td>
-                                                <Text size="sm">{trace.operation || '—'}</Text>
-                                            </Table.Td>
-                                            <Table.Td>
-                                                <Group gap={4}>
-                                                    <Clock size={12} color="#868e96" />
-                                                    <Text size="sm">{trace.duration_ms !== undefined ? trace.duration_ms.toFixed(1) : '0.0'}ms</Text>
-                                                </Group>
-                                            </Table.Td>
-                                            <Table.Td>
-                                                <Badge size="xs" color={STATUS_COLORS[trace.status] || 'gray'}>
-                                                    {trace.status || 'UNSET'}
-                                                </Badge>
-                                            </Table.Td>
-                                            <Table.Td>
-                                                <Badge size="xs" variant="light">{trace.span_count ?? 0}</Badge>
-                                            </Table.Td>
-                                            <Table.Td>
-                                                <Text size="xs" c="dimmed">{new Date(trace.timestamp).toLocaleString()}</Text>
+                                            <Table.Td colSpan={columns.length} p={0}>
+                                                <Box p="md" bg="var(--mantine-color-gray-0)" style={{ borderTop: '1px solid var(--mantine-color-gray-2)' }}>
+                                                    <Group justify="space-between" mb="xs">
+                                                        <Title order={6}>Spans ({row.original.spans?.length || 0})</Title>
+                                                        <Badge variant="outline" size="xs">{row.original.trace_id}</Badge>
+                                                    </Group>
+                                                    <Table striped highlightOnHover withTableBorder>
+                                                        <Table.Thead>
+                                                            <Table.Tr>
+                                                                <Table.Th>Span ID</Table.Th>
+                                                                <Table.Th>Operation</Table.Th>
+                                                                <Table.Th>Duration</Table.Th>
+                                                                <Table.Th>Status</Table.Th>
+                                                                <Table.Th>Start Time</Table.Th>
+                                                            </Table.Tr>
+                                                        </Table.Thead>
+                                                        <Table.Tbody>
+                                                            {(row.original.spans || []).map((span: Span) => (
+                                                                <Table.Tr key={span.id}>
+                                                                    <Table.Td><Text size="xs" ff="monospace">{span.span_id.substring(0, 8)}</Text></Table.Td>
+                                                                    <Table.Td>{span.operation_name}</Table.Td>
+                                                                    <Table.Td>{(span.duration / 1000).toFixed(2)}ms</Table.Td>
+                                                                    <Table.Td>
+                                                                        <Badge size="xs" color={STATUS_COLORS[span.status] || 'gray'}>
+                                                                            {span.status}
+                                                                        </Badge>
+                                                                    </Table.Td>
+                                                                    <Table.Td>{new Date(span.start_time).toLocaleTimeString()}</Table.Td>
+                                                                </Table.Tr>
+                                                            ))}
+                                                        </Table.Tbody>
+                                                    </Table>
+                                                </Box>
                                             </Table.Td>
                                         </Table.Tr>
-                                        {isExpanded && (
-                                            <Table.Tr>
-                                                <Table.Td colSpan={8} p={0}>
-                                                    <Box p="md" bg="var(--mantine-color-gray-0)">
-                                                        <Title order={6} mb="xs">Spans ({trace.spans?.length || 0})</Title>
-                                                        <Table withTableBorder>
-                                                            <Table.Thead>
-                                                                <Table.Tr>
-                                                                    <Table.Th>Span ID</Table.Th>
-                                                                    <Table.Th>Operation</Table.Th>
-                                                                    <Table.Th>Duration</Table.Th>
-                                                                    <Table.Th>Status</Table.Th>
-                                                                    <Table.Th>Start Time</Table.Th>
-                                                                </Table.Tr>
-                                                            </Table.Thead>
-                                                            <Table.Tbody>
-                                                                {(trace.spans || []).map(span => (
-                                                                    <Table.Tr key={span.id}>
-                                                                        <Table.Td><Text size="xs" ff="monospace">{span.span_id.substring(0, 8)}</Text></Table.Td>
-                                                                        <Table.Td>{span.operation_name}</Table.Td>
-                                                                        <Table.Td>{(span.duration / 1000).toFixed(2)}ms</Table.Td>
-                                                                        <Table.Td>
-                                                                            <Badge size="xs" color={STATUS_COLORS[span.status] || 'gray'}>
-                                                                                {span.status}
-                                                                            </Badge>
-                                                                        </Table.Td>
-                                                                        <Table.Td>{new Date(span.start_time).toLocaleTimeString()}</Table.Td>
-                                                                    </Table.Tr>
-                                                                ))}
-                                                            </Table.Tbody>
-                                                        </Table>
-                                                    </Box>
-                                                </Table.Td>
-                                            </Table.Tr>
-                                        )}
-                                    </React.Fragment>
-                                )
-                            })}
+                                    )}
+                                </React.Fragment>
+                            ))}
                         </Table.Tbody>
                     </Table>
-
                 </Box>
 
                 {totalPages > 1 && (

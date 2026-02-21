@@ -200,7 +200,7 @@ export function ServiceMap() {
     }, [metrics, tr.start, tr.end, setNodes, setEdges])
 
     return (
-        <Stack gap="md" style={{ height: 'calc(100vh - 100px)' }}>
+        <Stack gap="md" style={{ height: '100%' }}>
             <Group justify="space-between">
                 <Group gap="sm">
                     <Title order={3}>Service Topology</Title>
