@@ -83,6 +83,11 @@ export interface LatencyPoint {
     p99: number
 }
 
+export interface LatencyHeatmapPoint {
+    timestamp: string
+    duration: number // Microseconds
+}
+
 export interface ServiceError {
     service_name: string
     error_count: number
