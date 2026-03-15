@@ -2,6 +2,7 @@ package ui
 
 import (
 	"embed"
+	"fmt"
 	"html/template"
 	"net/http"
 	"strings"
@@ -16,21 +17,50 @@ import (
 var content embed.FS
 
 type Server struct {
-	repo    *storage.Repository
-	metrics *telemetry.Metrics
-	topo    *graph.Graph
-	vidx    *vectordb.Index
-	tmpl    *template.Template
+	repo       *storage.Repository
+	metrics    *telemetry.Metrics
+	topo       *graph.Graph
+	vidx       *vectordb.Index
+	tmpl       *template.Template
+	mcpEnabled bool
+	mcpPath    string
+}
+
+// fmtNum formats an integer-like value with K / M / B suffix.
+func fmtNum(v any) string {
+	var n float64
+	switch val := v.(type) {
+	case int:
+		n = float64(val)
+	case int32:
+		n = float64(val)
+	case int64:
+		n = float64(val)
+	case float64:
+		n = val
+	case float32:
+		n = float64(val)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+	switch {
+	case n >= 1_000_000_000:
+		return fmt.Sprintf("%.2fB", n/1_000_000_000)
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.2fM", n/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fK", n/1_000)
+	default:
+		return fmt.Sprintf("%.0f", n)
+	}
 }
 
 func NewServer(repo *storage.Repository, metrics *telemetry.Metrics, topo *graph.Graph, vidx *vectordb.Index) *Server {
-	// Create template with custom functions
 	tmpl := template.New("argus").Funcs(template.FuncMap{
 		"text_uppercase": strings.ToUpper,
 		"text_lowercase": strings.ToLower,
+		"fmt_num":        fmtNum,
 	})
-
-	// Parse all templates from the embedded FS
 	tmpl = template.Must(tmpl.ParseFS(content, "templates/*.html"))
 
 	return &Server{
@@ -39,21 +69,36 @@ func NewServer(repo *storage.Repository, metrics *telemetry.Metrics, topo *graph
 		topo:    topo,
 		vidx:    vidx,
 		tmpl:    tmpl,
+		mcpPath: "/mcp",
+	}
+}
+
+// SetMCPConfig configures MCP metadata shown in the UI.
+func (s *Server) SetMCPConfig(enabled bool, path string) {
+	s.mcpEnabled = enabled
+	if path != "" {
+		s.mcpPath = path
 	}
 }
 
 func (s *Server) RegisterRoutes(mux *http.ServeMux) error {
-	// Serve static files
 	mux.Handle("/static/", http.FileServer(http.FS(content)))
 
-	// UI Routes
 	mux.HandleFunc("/", s.handleDashboard)
-	mux.HandleFunc("/logs", s.handleLogs)
+	mux.HandleFunc("/logs", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/", http.StatusMovedPermanently)
+	})
 	mux.HandleFunc("/traces", s.handleTraces)
 	mux.HandleFunc("/traces/", s.handleTraceDetail)
-	mux.HandleFunc("/metrics", s.handleMetrics)
-	mux.HandleFunc("/storage", s.handleStorage)
 	mux.HandleFunc("/services", s.handleServices)
+	mux.HandleFunc("/mcp-console", s.handleMCPConsole)
+	// Redirect old standalone pages to dashboard
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/", http.StatusMovedPermanently)
+	})
+	mux.HandleFunc("/storage", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/", http.StatusMovedPermanently)
+	})
 
 	return nil
 }
@@ -65,14 +110,16 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	traces, _ := s.repo.RecentTraces(10)
-	summary, _ := s.repo.GetStats()
+	stats, _ := s.repo.GetStats()
 	health := s.metrics.GetHealthStats()
 
-	err := s.tmpl.ExecuteTemplate(w, "dashboard.html", map[string]interface{}{
+	err := s.tmpl.ExecuteTemplate(w, "dashboard.html", map[string]any{
 		"Title":       "Dashboard - Argus",
 		"Traces":      traces,
-		"Stats":       summary,
+		"Stats":       stats,
 		"HealthStats": health,
+		"MCPPath":     s.mcpPath,
+		"MCPEnabled":  s.mcpEnabled,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -81,7 +128,7 @@ func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query().Get("q")
-	limit := 100 // default
+	limit := 100
 
 	var logs []storage.Log
 	var err error
@@ -97,7 +144,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.tmpl.ExecuteTemplate(w, "logs.html", map[string]interface{}{
+	err = s.tmpl.ExecuteTemplate(w, "logs.html", map[string]any{
 		"Title": "Logs - Argus",
 		"Logs":  logs,
 		"Query": query,
@@ -114,7 +161,7 @@ func (s *Server) handleTraces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.tmpl.ExecuteTemplate(w, "traces.html", map[string]interface{}{
+	err = s.tmpl.ExecuteTemplate(w, "traces.html", map[string]any{
 		"Title":  "Traces - Argus",
 		"Traces": traces,
 	})
@@ -136,7 +183,7 @@ func (s *Server) handleTraceDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.tmpl.ExecuteTemplate(w, "trace_detail.html", map[string]interface{}{
+	err = s.tmpl.ExecuteTemplate(w, "trace_detail.html", map[string]any{
 		"Title": "Trace: " + traceID + " - Argus",
 		"Trace": trace,
 	})
@@ -145,40 +192,24 @@ func (s *Server) handleTraceDetail(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	health := s.metrics.GetHealthStats()
-
-	err := s.tmpl.ExecuteTemplate(w, "metrics.html", map[string]interface{}{
-		"Title":       "Metrics - Argus",
-		"HealthStats": health,
-	})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-}
-
-func (s *Server) handleStorage(w http.ResponseWriter, r *http.Request) {
-	stats, err := s.repo.GetStats()
-	if err != nil {
-		http.Error(w, "Failed to load storage stats: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	err = s.tmpl.ExecuteTemplate(w, "storage.html", map[string]interface{}{
-		"Title": "Storage - Argus",
-		"Stats": stats,
-	})
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-}
 
 func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
 	nodes := s.topo.GetNodes()
 
-	err := s.tmpl.ExecuteTemplate(w, "services.html", map[string]interface{}{
+	err := s.tmpl.ExecuteTemplate(w, "services.html", map[string]any{
 		"Title": "Services - Argus",
 		"Nodes": nodes,
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func (s *Server) handleMCPConsole(w http.ResponseWriter, r *http.Request) {
+	err := s.tmpl.ExecuteTemplate(w, "mcp_console.html", map[string]any{
+		"Title":      "MCP Console - Argus",
+		"MCPPath":    s.mcpPath,
+		"MCPEnabled": s.mcpEnabled,
 	})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

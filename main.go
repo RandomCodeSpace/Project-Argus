@@ -272,12 +272,9 @@ func main() {
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				metrics.SetDLQSize(dlq.Size())
-				metrics.DLQDiskBytes.Set(float64(dlq.DiskBytes()))
-			}
+		for range ticker.C {
+			metrics.SetDLQSize(dlq.Size())
+			metrics.DLQDiskBytes.Set(float64(dlq.DiskBytes()))
 		}
 	}()
 
@@ -322,6 +319,7 @@ func main() {
 
 	// Embedded UI Server
 	uiServer := ui.NewServer(repo, metrics, svcGraph, vectorIdx)
+	uiServer.SetMCPConfig(cfg.MCPEnabled, cfg.MCPPath)
 	if err := uiServer.RegisterRoutes(mux); err != nil {
 		log.Fatalf("Failed to register UI routes: %v", err)
 	}
@@ -373,10 +371,10 @@ func main() {
 func metricsUnaryInterceptor(m *telemetry.Metrics) grpc.UnaryServerInterceptor {
 	return func(
 		ctx context.Context,
-		req interface{},
+		req any,
 		info *grpc.UnaryServerInfo,
 		handler grpc.UnaryHandler,
-	) (interface{}, error) {
+	) (any, error) {
 		start := time.Now()
 		resp, err := handler(ctx, req)
 		duration := time.Since(start).Seconds()

@@ -66,17 +66,54 @@ func NewRepository(metrics *telemetry.Metrics) (*Repository, error) {
 // GetStats returns high-level database stats.
 func (r *Repository) GetStats() (map[string]interface{}, error) {
 	var traceCount int64
+	var logCount int64
 	var errorCount int64
 
 	if err := r.db.Model(&Trace{}).Count(&traceCount).Error; err != nil {
 		return nil, fmt.Errorf("failed to count traces: %w", err)
 	}
 
+	if err := r.db.Model(&Log{}).Count(&logCount).Error; err != nil {
+		return nil, fmt.Errorf("failed to count logs: %w", err)
+	}
+
 	if err := r.db.Model(&Log{}).Where("severity = ?", "ERROR").Count(&errorCount).Error; err != nil {
 		return nil, fmt.Errorf("failed to count error logs: %w", err)
 	}
 
+	// Count distinct services across both logs and traces.
+	var serviceNames []string
+	r.db.Model(&Log{}).Distinct("service_name").Pluck("service_name", &serviceNames)
+	traceServices := []string{}
+	r.db.Model(&Trace{}).Distinct("service_name").Pluck("service_name", &traceServices)
+	serviceSet := make(map[string]struct{}, len(serviceNames)+len(traceServices))
+	for _, s := range serviceNames {
+		if s != "" {
+			serviceSet[s] = struct{}{}
+		}
+	}
+	for _, s := range traceServices {
+		if s != "" {
+			serviceSet[s] = struct{}{}
+		}
+	}
+
+	// Estimate DB size (SQLite only; 0 for other drivers).
+	var dbSizeMB float64
+	if r.driver == "sqlite" {
+		var pageCount, pageSize int64
+		r.db.Raw("PRAGMA page_count").Scan(&pageCount)
+		r.db.Raw("PRAGMA page_size").Scan(&pageSize)
+		dbSizeMB = float64(pageCount*pageSize) / (1024 * 1024)
+	}
+
 	return map[string]interface{}{
+		"LogCount":     logCount,
+		"TraceCount":   traceCount,
+		"ErrorCount":   errorCount,
+		"ServiceCount": len(serviceSet),
+		"DBSizeMB":     fmt.Sprintf("%.1f", dbSizeMB),
+		// Legacy snake_case keys kept for any existing API consumers.
 		"trace_count": traceCount,
 		"error_count": errorCount,
 	}, nil

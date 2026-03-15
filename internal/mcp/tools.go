@@ -33,16 +33,30 @@ var toolDefs = []Tool{
 	},
 	{
 		Name:        "search_logs",
-		Description: "Searches logs by severity, service, body text, and time range. Returns matching log entries.",
+		Description: "Searches log entries by severity, service, body text, trace ID, and time range. Returns id, timestamp, severity, service_name, body, trace_id. Default window is last 24h. Use severity=ERROR to find errors, query= for full-text search, trace_id= to correlate with a trace. Use page= for pagination.",
 		InputSchema: InputSchema{
 			Type: "object",
 			Properties: map[string]Property{
-				"query":    {Type: "string", Description: "Text to search in log body."},
-				"severity": {Type: "string", Description: "Filter by severity: ERROR, WARN, INFO, DEBUG."},
-				"service":  {Type: "string", Description: "Filter by service name."},
-				"start":    {Type: "string", Description: "Start time RFC3339. Defaults to 1h ago."},
+				"query":    {Type: "string", Description: "Full-text search in log body."},
+				"severity": {Type: "string", Description: "Filter by severity level: ERROR, WARN, INFO, DEBUG."},
+				"service":  {Type: "string", Description: "Filter by service name (exact match)."},
+				"trace_id": {Type: "string", Description: "Filter logs belonging to a specific trace ID."},
+				"start":    {Type: "string", Description: "Start time RFC3339. Defaults to 24h ago."},
 				"end":      {Type: "string", Description: "End time RFC3339. Defaults to now."},
-				"limit":    {Type: "number", Description: "Max results (default 20, max 100)."},
+				"limit":    {Type: "number", Description: "Max results per page (default 50, max 200)."},
+				"page":     {Type: "number", Description: "Page number for pagination (default 0)."},
+			},
+		},
+	},
+	{
+		Name:        "tail_logs",
+		Description: "Returns the N most recent log entries, optionally filtered by service and/or severity. No time range needed — fastest way to see what's happening right now.",
+		InputSchema: InputSchema{
+			Type: "object",
+			Properties: map[string]Property{
+				"service":  {Type: "string", Description: "Filter by service name."},
+				"severity": {Type: "string", Description: "Filter by severity: ERROR, WARN, INFO, DEBUG."},
+				"limit":    {Type: "number", Description: "Number of recent entries to return (default 20, max 100)."},
 			},
 		},
 	},
@@ -142,6 +156,8 @@ func (s *Server) toolHandler(name string, args map[string]any) ToolCallResult {
 		return s.toolGetServiceHealth(args)
 	case "search_logs":
 		return s.toolSearchLogs(args)
+	case "tail_logs":
+		return s.toolTailLogs(args)
 	case "get_trace":
 		return s.toolGetTrace(args)
 	case "search_traces":
@@ -191,38 +207,104 @@ func (s *Server) toolGetServiceHealth(args map[string]any) ToolCallResult {
 	return textResult(string(data))
 }
 
+// logSummary is a lean projection of storage.Log for AI consumption.
+// It strips compressed/binary fields and only returns what an AI agent needs.
+type logSummary struct {
+	ID          uint      `json:"id"`
+	Timestamp   time.Time `json:"timestamp"`
+	Severity    string    `json:"severity"`
+	ServiceName string    `json:"service_name"`
+	Body        string    `json:"body"`
+	TraceID     string    `json:"trace_id,omitempty"`
+	SpanID      string    `json:"span_id,omitempty"`
+}
+
+func toLogSummaries(logs []storage.Log) []logSummary {
+	out := make([]logSummary, len(logs))
+	for i, l := range logs {
+		out[i] = logSummary{
+			ID:          l.ID,
+			Timestamp:   l.Timestamp,
+			Severity:    l.Severity,
+			ServiceName: l.ServiceName,
+			Body:        string(l.Body),
+			TraceID:     l.TraceID,
+			SpanID:      l.SpanID,
+		}
+	}
+	return out
+}
+
 func (s *Server) toolSearchLogs(args map[string]any) ToolCallResult {
 	end := time.Now()
-	start := end.Add(-1 * time.Hour)
+	start := end.Add(-24 * time.Hour) // wider default window for AI agents
 	parseTime(args, "start", &start)
 	parseTime(args, "end", &end)
 
+	limit := argInt(args, "limit", 50)
+	if limit > 200 {
+		limit = 200
+	}
+	page := argInt(args, "page", 0)
+
+	filter := storage.LogFilter{
+		StartTime: start,
+		EndTime:   end,
+		Limit:     limit,
+		Offset:    page * limit,
+	}
+	if v, ok := args["severity"].(string); ok && v != "" {
+		filter.Severity = v
+	}
+	if v, ok := args["service"].(string); ok && v != "" {
+		filter.ServiceName = v
+	}
+	if v, ok := args["query"].(string); ok && v != "" {
+		filter.Search = v
+	}
+	if v, ok := args["trace_id"].(string); ok && v != "" {
+		filter.TraceID = v
+	}
+
+	logs, total, err := s.repo.GetLogsV2(filter)
+	if err != nil {
+		return errorResult(fmt.Sprintf("search_logs failed: %v", err))
+	}
+
+	result := map[string]any{
+		"total":   total,
+		"page":    page,
+		"limit":   limit,
+		"count":   len(logs),
+		"entries": toLogSummaries(logs),
+	}
+	data, _ := json.MarshalIndent(result, "", "  ")
+	return resourceResult("argus://logs/search", "application/json", string(data))
+}
+
+func (s *Server) toolTailLogs(args map[string]any) ToolCallResult {
 	limit := argInt(args, "limit", 20)
 	if limit > 100 {
 		limit = 100
 	}
 
 	filter := storage.LogFilter{
-		StartTime: start,
-		EndTime:   end,
-		Limit:     limit,
+		EndTime: time.Now(),
+		Limit:   limit,
 	}
-	if v, ok := args["severity"].(string); ok {
-		filter.Severity = v
-	}
-	if v, ok := args["service"].(string); ok {
+	if v, ok := args["service"].(string); ok && v != "" {
 		filter.ServiceName = v
 	}
-	if v, ok := args["query"].(string); ok {
-		filter.Search = v
+	if v, ok := args["severity"].(string); ok && v != "" {
+		filter.Severity = v
 	}
 
 	logs, _, err := s.repo.GetLogsV2(filter)
 	if err != nil {
-		return errorResult(fmt.Sprintf("search_logs failed: %v", err))
+		return errorResult(fmt.Sprintf("tail_logs failed: %v", err))
 	}
-	data, _ := json.MarshalIndent(logs, "", "  ")
-	return resourceResult("argus://logs/search", "application/json", string(data))
+	data, _ := json.MarshalIndent(toLogSummaries(logs), "", "  ")
+	return resourceResult("argus://logs/tail", "application/json", string(data))
 }
 
 func (s *Server) toolGetTrace(args map[string]any) ToolCallResult {

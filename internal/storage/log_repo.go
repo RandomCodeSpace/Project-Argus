@@ -14,6 +14,7 @@ type LogFilter struct {
 	ServiceName string
 	Severity    string
 	Search      string
+	TraceID     string
 	StartTime   time.Time
 	EndTime     time.Time
 	Limit       int
@@ -62,6 +63,9 @@ func (r *Repository) GetLogsV2(filter LogFilter) ([]Log, int64, error) {
 	}
 	if filter.Severity != "" {
 		base = base.Where("severity = ?", filter.Severity)
+	}
+	if filter.TraceID != "" {
+		base = base.Where("trace_id = ?", filter.TraceID)
 	}
 	if !filter.StartTime.IsZero() {
 		base = base.Where("timestamp >= ?", filter.StartTime)

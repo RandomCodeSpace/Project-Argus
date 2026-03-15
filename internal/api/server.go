@@ -82,7 +82,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	// Admin & System
 	mux.HandleFunc("GET /api/stats", s.handleGetStats)
 	mux.HandleFunc("GET /api/health", s.metrics.HealthHandler())
-	mux.Handle("GET /metrics", telemetry.PrometheusHandler())
+	mux.Handle("GET /metrics/prometheus", telemetry.PrometheusHandler())
 	mux.HandleFunc("DELETE /api/admin/purge", s.handlePurge)
 	mux.HandleFunc("POST /api/admin/vacuum", s.handleVacuum)
 

@@ -1,23 +1,50 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Argus - Storage</title>
-    <link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
-    <nav>
-        <a href="/">Dashboard</a> | <a href="/logs">Logs</a> | <a href="/storage">Storage</a> | <a href="/metrics">Metrics</a>
-    </nav>
-    <h1>Storage Overview</h1>
-    <div class="card">
-        <h3>Repository Stats</h3>
-        <p>Active Chunks: {{.RepoStats.Chunks}}</p>
-        <p>Total Bytes (hot): {{.RepoStats.TotalBytes}}</p>
-        <p>Retention: {{.RepoStats.Retention}}</p>
+{{template "header" .}}
+
+<div class="space-y-6">
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+            <p class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Total Traces</p>
+            <p class="text-3xl font-bold text-slate-800">{{index .Stats "trace_count"}}</p>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+            <p class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Error Logs</p>
+            <p class="text-3xl font-bold text-red-600">{{index .Stats "error_count"}}</p>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+            <p class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Heap Used</p>
+            <p class="text-3xl font-bold text-slate-800">{{printf "%.1f" .HealthStats.HeapAllocMB}} MB</p>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
+            <p class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">DB Latency P99</p>
+            <p class="text-3xl font-bold text-slate-800">{{printf "%.2f" .HealthStats.DBLatencyP99Ms}} ms</p>
+        </div>
     </div>
-    <div class="card">
-        <h3>Vector Index</h3>
-        <p>Entries: {{.VectorEntries}}</p>
+
+    <!-- Runtime Health -->
+    <div class="bg-white rounded-xl border border-gray-100 shadow-sm">
+        <div class="px-6 py-4 border-b border-gray-100">
+            <h3 class="font-semibold text-gray-800">Runtime Health</h3>
+        </div>
+        <div class="p-6 grid grid-cols-2 md:grid-cols-4 gap-6">
+            <div>
+                <p class="text-xs text-gray-500 mb-1">Uptime</p>
+                <p class="font-semibold text-slate-800">{{.HealthStats.UptimeSeconds}}s</p>
+            </div>
+            <div>
+                <p class="text-xs text-gray-500 mb-1">Goroutines</p>
+                <p class="font-semibold text-slate-800">{{.HealthStats.Goroutines}}</p>
+            </div>
+            <div>
+                <p class="text-xs text-gray-500 mb-1">Active Connections</p>
+                <p class="font-semibold text-slate-800">{{.HealthStats.ActiveConns}}</p>
+            </div>
+            <div>
+                <p class="text-xs text-gray-500 mb-1">DLQ Size</p>
+                <p class="font-semibold text-slate-800">{{.HealthStats.DLQSize}} files</p>
+            </div>
+        </div>
     </div>
-</body>
-</html>
+</div>
+
+{{template "footer" .}}

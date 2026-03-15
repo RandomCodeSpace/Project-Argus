@@ -23,7 +23,8 @@ const (
 
 // Server is the HTTP Streamable MCP server.
 // POST /mcp  — JSON-RPC 2.0 request/response
-// GET  /mcp  — SSE stream for real-time notifications (optional subscription)
+// GET  /mcp  — SSE stream for real-time notifications
+// OPTIONS /mcp — CORS preflight
 type Server struct {
 	repo      *storage.Repository
 	metrics   *telemetry.Metrics
@@ -46,21 +47,34 @@ func New(
 	}
 }
 
-// Handler returns an http.Handler that serves both POST (RPC) and GET (SSE).
+// Handler returns an http.Handler for the MCP server.
+// Works correctly when mounted with http.StripPrefix.
 func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /mcp", s.handleRPC)
-	mux.HandleFunc("GET /mcp", s.handleSSE)
-	// Also accept at root of sub-handler so callers can mount at any path.
-	mux.HandleFunc("POST /", s.handleRPC)
-	mux.HandleFunc("GET /", s.handleSSE)
-	return mux
+	return http.HandlerFunc(s.ServeHTTP)
+}
+
+// ServeHTTP dispatches by HTTP method — no path routing needed.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// CORS headers on every response
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Mcp-Session-Id, Accept")
+
+	switch r.Method {
+	case http.MethodOptions:
+		w.WriteHeader(http.StatusNoContent)
+	case http.MethodPost:
+		s.handleRPC(w, r)
+	case http.MethodGet:
+		s.handleSSE(w, r)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 // handleRPC processes JSON-RPC 2.0 requests.
 func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MB cap
 	if err != nil {
@@ -81,7 +95,7 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 
 	slog.Debug("MCP RPC", "method", req.Method)
 
-	var result interface{}
+	var result any
 	var rpcErr *RPCError
 
 	switch req.Method {
@@ -95,6 +109,11 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 			},
 		}
 
+	case "initialized", "notifications/initialized":
+		// Client acknowledges initialization — no response needed (notification).
+		w.WriteHeader(http.StatusAccepted)
+		return
+
 	case "tools/list":
 		result = ToolsListResult{Tools: toolDefs}
 
@@ -104,8 +123,7 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 			rpcErr = &RPCError{Code: ErrInvalidParams, Message: "invalid tools/call params"}
 			break
 		}
-		callResult := s.toolHandler(params.Name, params.Arguments)
-		result = callResult
+		result = s.toolHandler(params.Name, params.Arguments)
 
 	case "ping":
 		result = map[string]string{"status": "ok", "ts": time.Now().UTC().Format(time.RFC3339)}
@@ -132,7 +150,6 @@ func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSSE streams server-sent events for real-time MCP subscriptions.
-// Clients can GET /mcp to receive periodic system graph snapshots.
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -143,10 +160,9 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	// Send initial endpoint event (MCP Streamable HTTP spec).
-	writeSSE(w, flusher, "endpoint", `{"type":"endpoint","capabilities":{"tools":{}}}`)
+	// Send initial endpoint event per MCP Streamable HTTP spec.
+	writeSSE(w, flusher, "endpoint", `{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}`)
 
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -178,16 +194,16 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// writeSSE writes a single SSE event to the response.
+// writeSSE writes a single SSE event.
 func writeSSE(w http.ResponseWriter, f http.Flusher, event, data string) {
-	// Escape newlines in data per SSE spec.
 	data = strings.ReplaceAll(data, "\n", "\ndata: ")
 	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data)
 	f.Flush()
 }
 
 // writeError writes a JSON-RPC error response.
-func writeError(w http.ResponseWriter, id interface{}, code int, msg string) {
+func writeError(w http.ResponseWriter, id any, code int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
 	resp := JSONRPCResponse{
 		JSONRPC: "2.0",
 		ID:      id,
@@ -197,7 +213,7 @@ func writeError(w http.ResponseWriter, id interface{}, code int, msg string) {
 }
 
 // parseToolCallParams flexibly parses the params field of a tools/call request.
-func parseToolCallParams(raw interface{}) (ToolCallParams, bool) {
+func parseToolCallParams(raw any) (ToolCallParams, bool) {
 	if raw == nil {
 		return ToolCallParams{}, false
 	}
