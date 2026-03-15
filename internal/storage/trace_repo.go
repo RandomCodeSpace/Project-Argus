@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -80,31 +82,32 @@ func (r *Repository) GetTrace(traceID string) (*Trace, error) {
 	return &trace, nil
 }
 
-// GetTracesFiltered retrieves traces with filtering and pagination
+// spanSummary is a lightweight struct used to enrich trace list items.
+type spanSummary struct {
+	TraceID       string
+	SpanCount     int
+	OperationName string
+}
+
+// GetTracesFiltered retrieves traces with filtering and pagination.
+// Spans are NOT eagerly loaded — a single batch summary query is used instead.
 func (r *Repository) GetTracesFiltered(start, end time.Time, serviceNames []string, status, search string, limit, offset int, sortBy, orderBy string) (*TracesResponse, error) {
 	var traces []Trace
 	var total int64
 
-	query := r.db.Model(&Trace{})
+	base := r.db.Model(&Trace{})
 
 	if !start.IsZero() && !end.IsZero() {
-		query = query.Where("timestamp BETWEEN ? AND ?", start, end)
+		base = base.Where("timestamp BETWEEN ? AND ?", start, end)
 	}
-
 	if len(serviceNames) > 0 {
-		query = query.Where("service_name IN ?", serviceNames)
+		base = base.Where("service_name IN ?", serviceNames)
 	}
-
 	if status != "" {
-		query = query.Where("status LIKE ?", "%"+status+"%")
+		base = base.Where("status LIKE ?", "%"+status+"%")
 	}
-
 	if search != "" {
-		query = query.Where("trace_id LIKE ?", "%"+search+"%")
-	}
-
-	if err := query.Count(&total).Error; err != nil {
-		return nil, fmt.Errorf("failed to count traces: %w", err)
+		base = base.Where("trace_id LIKE ?", "%"+search+"%")
 	}
 
 	orderClause := "timestamp DESC"
@@ -125,17 +128,45 @@ func (r *Repository) GetTracesFiltered(start, end time.Time, serviceNames []stri
 		}
 	}
 
-	if err := query.Preload("Spans").Order(orderClause).Limit(limit).Offset(offset).Find(&traces).Error; err != nil {
+	// Run COUNT and SELECT in parallel using independent sessions.
+	var g errgroup.Group
+	g.Go(func() error {
+		return base.Session(&gorm.Session{}).Count(&total).Error
+	})
+	g.Go(func() error {
+		return base.Session(&gorm.Session{}).Order(orderClause).Limit(limit).Offset(offset).Find(&traces).Error
+	})
+	if err := g.Wait(); err != nil {
 		return nil, fmt.Errorf("failed to fetch traces: %w", err)
 	}
 
-	for i := range traces {
-		traces[i].SpanCount = len(traces[i].Spans)
-		traces[i].DurationMs = float64(traces[i].Duration) / 1000.0
-		if traces[i].SpanCount > 0 {
-			traces[i].Operation = traces[i].Spans[0].OperationName
-		} else {
-			traces[i].Operation = "Unknown"
+	// Enrich traces with span summary via a single batch query (no N+1, no full span load).
+	if len(traces) > 0 {
+		traceIDs := make([]string, len(traces))
+		for i, t := range traces {
+			traceIDs[i] = t.TraceID
+		}
+
+		var summaries []spanSummary
+		r.db.Raw(
+			`SELECT trace_id, COUNT(*) as span_count, MIN(operation_name) as operation_name
+			 FROM spans WHERE trace_id IN ? GROUP BY trace_id`, traceIDs,
+		).Scan(&summaries)
+
+		sm := make(map[string]spanSummary, len(summaries))
+		for _, s := range summaries {
+			sm[s.TraceID] = s
+		}
+
+		for i := range traces {
+			s := sm[traces[i].TraceID]
+			traces[i].SpanCount = s.SpanCount
+			traces[i].DurationMs = float64(traces[i].Duration) / 1000.0
+			if s.OperationName != "" {
+				traces[i].Operation = s.OperationName
+			} else {
+				traces[i].Operation = "Unknown"
+			}
 		}
 	}
 

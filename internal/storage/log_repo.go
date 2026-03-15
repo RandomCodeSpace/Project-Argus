@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"golang.org/x/sync/errgroup"
+	"gorm.io/gorm"
 )
 
 // LogFilter defines criteria for searching logs.
@@ -47,38 +50,44 @@ func (r *Repository) GetRecentLogs(limit int) ([]Log, error) {
 }
 
 // GetLogsV2 performs advanced filtering and search on logs.
+// COUNT and SELECT are run in parallel via errgroup for reduced latency.
 func (r *Repository) GetLogsV2(filter LogFilter) ([]Log, int64, error) {
 	var logs []Log
 	var total int64
 
-	query := r.db.Model(&Log{})
+	base := r.db.Model(&Log{})
 
 	if filter.ServiceName != "" {
-		query = query.Where("service_name = ?", filter.ServiceName)
+		base = base.Where("service_name = ?", filter.ServiceName)
 	}
 	if filter.Severity != "" {
-		query = query.Where("severity = ?", filter.Severity)
+		base = base.Where("severity = ?", filter.Severity)
 	}
 	if !filter.StartTime.IsZero() {
-		query = query.Where("timestamp >= ?", filter.StartTime)
+		base = base.Where("timestamp >= ?", filter.StartTime)
 	}
 	if !filter.EndTime.IsZero() {
-		query = query.Where("timestamp <= ?", filter.EndTime)
+		base = base.Where("timestamp <= ?", filter.EndTime)
 	}
 	if filter.Search != "" {
 		search := "%" + filter.Search + "%"
-		query = query.Where("body LIKE ? OR trace_id LIKE ?", search, search)
+		base = base.Where("body LIKE ? OR trace_id LIKE ?", search, search)
 	}
 
-	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, fmt.Errorf("failed to count filtered logs: %w", err)
-	}
-
-	if err := query.Order("timestamp desc").
-		Limit(filter.Limit).
-		Offset(filter.Offset).
-		Find(&logs).Error; err != nil {
-		return nil, 0, fmt.Errorf("failed to fetch filtered logs: %w", err)
+	// Run COUNT and SELECT in parallel using independent sessions.
+	var g errgroup.Group
+	g.Go(func() error {
+		return base.Session(&gorm.Session{}).Count(&total).Error
+	})
+	g.Go(func() error {
+		return base.Session(&gorm.Session{}).
+			Order("timestamp desc").
+			Limit(filter.Limit).
+			Offset(filter.Offset).
+			Find(&logs).Error
+	})
+	if err := g.Wait(); err != nil {
+		return nil, 0, fmt.Errorf("failed to fetch logs: %w", err)
 	}
 
 	return logs, total, nil

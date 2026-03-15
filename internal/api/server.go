@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/RandomCodeSpace/argus/internal/cache"
 	"github.com/RandomCodeSpace/argus/internal/realtime"
 	"github.com/RandomCodeSpace/argus/internal/storage"
 	"github.com/RandomCodeSpace/argus/internal/telemetry"
@@ -15,6 +16,7 @@ type Server struct {
 	hub      *realtime.Hub
 	eventHub *realtime.EventHub
 	metrics  *telemetry.Metrics
+	cache    *cache.TTLCache
 }
 
 // NewServer creates a new API server.
@@ -24,6 +26,7 @@ func NewServer(repo *storage.Repository, hub *realtime.Hub, eventHub *realtime.E
 		hub:      hub,
 		eventHub: eventHub,
 		metrics:  metrics,
+		cache:    cache.New(),
 	}
 }
 
@@ -39,6 +42,9 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/metrics/latency_heatmap", s.handleGetLatencyHeatmap)
 	mux.HandleFunc("GET /api/metrics/dashboard", s.handleGetDashboardStats)
 	mux.HandleFunc("GET /api/metrics/service-map", s.handleGetServiceMapMetrics)
+
+	// System Graph (AI-consumable topology + health)
+	mux.HandleFunc("GET /api/system/graph", s.handleGetSystemGraph)
 
 	// Traces
 	mux.HandleFunc("GET /api/traces", s.handleGetTraces)

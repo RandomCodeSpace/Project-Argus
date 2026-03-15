@@ -22,14 +22,17 @@ type RawMetric struct {
 
 // Aggregator manages in-memory tumbling windows for metrics.
 type Aggregator struct {
-	repo       *storage.Repository
-	windowSize time.Duration
-	buckets    map[string]*storage.MetricBucket
-	mu         sync.Mutex
-	stopChan   chan struct{}
-	flushChan  chan []storage.MetricBucket
-	pool       sync.Pool
+	repo            *storage.Repository
+	windowSize      time.Duration
+	buckets         map[string]*storage.MetricBucket
+	mu              sync.Mutex
+	stopChan        chan struct{}
+	flushChan       chan []storage.MetricBucket
+	pool            sync.Pool
+	droppedBatches  int64
 }
+
+const persistenceWorkers = 3
 
 // NewAggregator creates a new TSDB aggregator.
 func NewAggregator(repo *storage.Repository, windowSize time.Duration) *Aggregator {
@@ -38,10 +41,10 @@ func NewAggregator(repo *storage.Repository, windowSize time.Duration) *Aggregat
 		windowSize: windowSize,
 		buckets:    make(map[string]*storage.MetricBucket),
 		stopChan:   make(chan struct{}),
-		flushChan:  make(chan []storage.MetricBucket, 100),
+		flushChan:  make(chan []storage.MetricBucket, 500), // increased from 100
 	}
 	a.pool.New = func() interface{} {
-		return make([]storage.MetricBucket, 0, 100) // Initial capacity estimate
+		return make([]storage.MetricBucket, 0, 100)
 	}
 	return a
 }
@@ -51,9 +54,11 @@ func (a *Aggregator) Start(ctx context.Context) {
 	ticker := time.NewTicker(a.windowSize)
 	defer ticker.Stop()
 
-	slog.Info("📈 TSDB Aggregator started", "window_size", a.windowSize)
+	slog.Info("📈 TSDB Aggregator started", "window_size", a.windowSize, "workers", persistenceWorkers)
 
-	go a.persistenceWorker(ctx)
+	for i := 0; i < persistenceWorkers; i++ {
+		go a.persistenceWorker(ctx)
+	}
 
 	for {
 		select {
@@ -75,16 +80,15 @@ func (a *Aggregator) Stop() {
 
 // Ingest adds a raw metric point to the current aggregator window.
 func (a *Aggregator) Ingest(m RawMetric) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	// Create a stable key for grouping
+	// Pre-compute key outside the lock — json.Marshal is CPU-bound and must not hold mu.
 	attrJSON, _ := json.Marshal(m.Attributes)
 	key := fmt.Sprintf("%s|%s|%s", m.ServiceName, m.Name, string(attrJSON))
 
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
 	bucket, exists := a.buckets[key]
 	if !exists {
-		// Round down timestamp to window start
 		windowStart := m.Timestamp.Truncate(a.windowSize)
 		bucket = &storage.MetricBucket{
 			Name:           m.Name,
@@ -100,7 +104,6 @@ func (a *Aggregator) Ingest(m RawMetric) {
 		return
 	}
 
-	// Update existing bucket
 	if m.Value < bucket.Min {
 		bucket.Min = m.Value
 	}
@@ -109,6 +112,19 @@ func (a *Aggregator) Ingest(m RawMetric) {
 	}
 	bucket.Sum += m.Value
 	bucket.Count++
+}
+
+// BucketCount returns the current number of in-memory buckets (for metrics/health).
+func (a *Aggregator) BucketCount() int {
+	a.mu.Lock()
+	n := len(a.buckets)
+	a.mu.Unlock()
+	return n
+}
+
+// DroppedBatches returns the total number of batches dropped due to a full flush channel.
+func (a *Aggregator) DroppedBatches() int64 {
+	return a.droppedBatches
 }
 
 // flush moves the current buckets to the flush channel and resets the in-memory map.
@@ -129,13 +145,14 @@ func (a *Aggregator) flush() {
 	select {
 	case a.flushChan <- batch:
 	default:
-		slog.Warn("⚠️ TSDB flush channel full, dropping metric batch", "count", len(batch))
+		a.droppedBatches++
+		slog.Warn("⚠️ TSDB flush channel full, dropping metric batch", "count", len(batch), "total_dropped", a.droppedBatches)
 		batch = batch[:0]
 		a.pool.Put(batch)
 	}
 }
 
-// persistenceWorker periodically writes flushed batches to the database.
+// persistenceWorker drains the flush channel and writes batches to the database.
 func (a *Aggregator) persistenceWorker(ctx context.Context) {
 	for {
 		select {
@@ -150,7 +167,6 @@ func (a *Aggregator) persistenceWorker(ctx context.Context) {
 			} else {
 				slog.Debug("💾 TSDB persisted metric batch", "count", len(batch))
 			}
-			// Recycle the batch slice
 			batch = batch[:0]
 			a.pool.Put(batch)
 		case <-ctx.Done():

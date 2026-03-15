@@ -3,6 +3,8 @@ package storage
 import (
 	"fmt"
 	"log"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,7 +71,7 @@ func NewDatabase(driver, dsn string) (*gorm.DB, error) {
 		db.Exec("PRAGMA synchronous=NORMAL")
 	}
 
-	// Configure Connection Pool
+	// Configure Connection Pool — configurable via env vars for non-SQLite drivers.
 	sqlDB, err := db.DB()
 	if err == nil {
 		switch strings.ToLower(driver) {
@@ -79,14 +81,35 @@ func NewDatabase(driver, dsn string) (*gorm.DB, error) {
 			sqlDB.SetConnMaxLifetime(time.Hour)
 			log.Printf("📊 SQLite Optimization: MaxOpen=1, WAL Mode=Enabled")
 		default:
-			sqlDB.SetMaxIdleConns(10)
-			sqlDB.SetMaxOpenConns(50)
-			sqlDB.SetConnMaxLifetime(time.Hour)
-			log.Printf("📊 DB Pool Configured: MaxOpen=50, MaxIdle=10, Driver=%s", driver)
+			maxOpen := getEnvPoolInt("DB_MAX_OPEN_CONNS", 50)
+			maxIdle := getEnvPoolInt("DB_MAX_IDLE_CONNS", 10)
+			lifetime := getEnvPoolDuration("DB_CONN_MAX_LIFETIME", time.Hour)
+			sqlDB.SetMaxOpenConns(maxOpen)
+			sqlDB.SetMaxIdleConns(maxIdle)
+			sqlDB.SetConnMaxLifetime(lifetime)
+			log.Printf("📊 DB Pool Configured: MaxOpen=%d, MaxIdle=%d, Driver=%s", maxOpen, maxIdle, driver)
 		}
 	}
 
 	return db, nil
+}
+
+func getEnvPoolInt(key string, fallback int) int {
+	if v, ok := os.LookupEnv(key); ok {
+		if i, err := strconv.Atoi(v); err == nil {
+			return i
+		}
+	}
+	return fallback
+}
+
+func getEnvPoolDuration(key string, fallback time.Duration) time.Duration {
+	if v, ok := os.LookupEnv(key); ok {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return fallback
 }
 
 // AutoMigrateModels runs GORM auto-migration for all Argus models.
