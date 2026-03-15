@@ -4,60 +4,55 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., v1.0.0)'
+        description: "Release version (e.g. v1.2.3, v1.2.3-alpha.1, v1.2.3-beta.2, v1.2.3-snapshot)"
         required: true
+        type: string
+
+permissions:
+  contents: write
 
 jobs:
-  release:
+  validate:
+    name: Validate version
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-          cache: 'npm'
-          cache-dependency-path: web/package-lock.json
-
-      - name: Install Dependencies & Build UI
-        working-directory: web
+      - name: Check version format
         run: |
-          npm ci
-          npm run build
-        env:
-          APP_VERSION: ${{ inputs.version }}
-
-      - name: Check for dist directory
-        run: |
-          if [ ! -d "web/dist" ]; then
-            echo "Error: web/dist directory not found after build"
+          # Accepts: v1.2.3 | v1.2.3-alpha | v1.2.3-alpha.1 | v1.2.3-beta.2 | v1.2.3-snapshot
+          SEMVER_RE='^v[0-9]+\.[0-9]+\.[0-9]+(-((alpha|beta|snapshot)(\.[0-9]+)?))?$'
+          if [[ ! "${{ inputs.version }}" =~ $SEMVER_RE ]]; then
+            echo "Error: version must be vMAJOR.MINOR.PATCH with an optional pre-release label."
+            echo "Valid examples: v1.2.3  v1.2.3-alpha  v1.2.3-alpha.1  v1.2.3-beta.2  v1.2.3-snapshot"
             exit 1
           fi
 
-      - name: Commit UI Build
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add -f web/dist
-          git commit -m "chore: build ui for release ${INPUT_VERSION} [skip ci]" || echo "No changes to commit"
-        env:
-          INPUT_VERSION: ${{ inputs.version }}
+  publish:
+    name: Tag and publish release
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Create Tag
-        run: |
-          git tag ${INPUT_VERSION}
-          git push origin ${INPUT_VERSION}
+      - name: Create tag and release
         env:
-          INPUT_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$VERSION"
+          git push origin "$VERSION"
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ inputs.version }}
-          generate_release_notes: true
+          # Wait for tag to be available (GitHub eventually-consistent)
+          sleep 2
+
+          PRERELEASE_FLAG=""
+          [[ "$VERSION" == *-* ]] && PRERELEASE_FLAG="--prerelease"
+
+          echo "Creating release for $VERSION (prerelease: $PRERELEASE_FLAG)"
+          gh release create "$VERSION" \
+            --title "$VERSION" \
+            --generate-notes \
+            $PRERELEASE_FLAG || \
+            { echo "Release creation failed"; exit 1; }
