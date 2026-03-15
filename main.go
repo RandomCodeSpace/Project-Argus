@@ -16,6 +16,7 @@ import (
 
 	"github.com/RandomCodeSpace/argus/internal/ai"
 	"github.com/RandomCodeSpace/argus/internal/api"
+	"github.com/RandomCodeSpace/argus/internal/archive"
 	"github.com/RandomCodeSpace/argus/internal/config"
 	"github.com/RandomCodeSpace/argus/internal/ingest"
 	"github.com/RandomCodeSpace/argus/internal/queue"
@@ -118,6 +119,16 @@ func main() {
 	defer cancelTSDB()
 	go tsdbAgg.Start(ctxTSDB)
 	slog.Info("📈 TSDB Aggregator started (30s window)")
+
+	// 4d. Initialize Archive Worker (hot/cold storage tiering)
+	archiver := archive.New(repo, cfg)
+	ctxArchive, cancelArchive := context.WithCancel(context.Background())
+	defer cancelArchive()
+	go archiver.Start(ctxArchive)
+	slog.Info("🗄️  Archive worker started",
+		"hot_retention_days", cfg.HotRetentionDays,
+		"cold_path", cfg.ColdStoragePath,
+	)
 
 	// 5. Initialize AI Service
 	aiService := ai.NewService(repo)

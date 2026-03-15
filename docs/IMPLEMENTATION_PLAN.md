@@ -24,6 +24,18 @@ Specialized in-memory/embedded databases are used as **processing accelerators**
 
 ---
 
+## Phase 1: Performance Fixes ✅ DONE (commit 648b428)
+
+**Changes delivered:**
+- `internal/tsdb/aggregator.go` — json.Marshal moved outside lock, flushChan 100→500, 3 persistence workers, `BucketCount()`/`DroppedBatches()` accessors
+- `internal/storage/trace_repo.go` — removed `Preload("Spans")` from list view; batch span-summary query; parallel COUNT+SELECT via errgroup
+- `internal/storage/log_repo.go` — parallel COUNT+SELECT via errgroup
+- `internal/config/config.go` — 20+ new env vars (pool, hot/cold, sampling, cardinality, DLQ, MCP, compression, vector)
+- `internal/storage/factory.go` — configurable connection pool via env vars
+- `internal/cache/ttl.go` *(new)* — in-memory TTL cache with background eviction
+- `internal/api/server.go` — cache field added, `GET /api/system/graph` registered
+- `internal/api/graph_handler.go` *(new)* — AI-consumable system graph with health scores + 10s TTL cache
+
 ## Phase 1: Performance Fixes (Highest Impact)
 
 ### 1.1 TSDB Aggregator — Move json.Marshal outside lock
