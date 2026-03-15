@@ -120,6 +120,24 @@ func (g *Graph) Snapshot() *Snapshot {
 	return g.snapshot
 }
 
+// GetNodes returns the current nodes in the graph.
+func (g *Graph) GetNodes() []*ServiceNode {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	nodes := make([]*ServiceNode, 0, len(g.snapshot.Nodes))
+	for _, n := range g.snapshot.Nodes {
+		nodes = append(nodes, n)
+	}
+	return nodes
+}
+
+// GetEdges returns the current edges in the graph.
+func (g *Graph) GetEdges() []ServiceEdge {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	return g.snapshot.Edges
+}
+
 // rebuild fetches recent spans and recomputes the graph.
 func (g *Graph) rebuild() {
 	since := time.Now().UTC().Add(-g.windowSize)

@@ -1,0 +1,55 @@
+{{template "header" .}}
+
+<div class="bg-white rounded-xl shadow-sm border border-gray-100 flex flex-col h-full">
+    <div class="px-6 py-4 border-b border-gray-100 bg-gray-50 rounded-t-xl flex justify-between items-center">
+        <h3 class="font-semibold text-gray-800">Service Dependency Graph</h3>
+        <button class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 text-sm font-medium rounded hover:bg-gray-50 transition">Refresh</button>
+    </div>
+    
+    <div class="p-6 flex-1 bg-slate-50 relative overflow-hidden flex items-center justify-center">
+        <!-- Visualization container -->
+        <div class="absolute inset-0 pattern-dots text-gray-200" style="background-image: radial-gradient(currentColor 1px, transparent 1px); background-size: 20px 20px;"></div>
+        
+        <div class="relative z-10 w-full max-w-4xl bg-white rounded-xl border border-gray-200 shadow-sm p-8">
+            <h4 class="text-center font-medium text-gray-500 mb-8 border-b border-gray-100 pb-4">Discovered Services</h4>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {{range .Nodes}}
+                <div class="bg-white border-2 border-indigo-100 rounded-lg p-5 hover:border-indigo-300 hover:shadow-md transition-all group">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold font-mono text-sm group-hover:bg-indigo-100 transition-colors">
+                            {{printf "%.2s" .Name | text_uppercase}}
+                        </div>
+                        <div>
+                            <div class="font-semibold text-slate-800">{{.Name}}</div>
+                            <div class="text-xs text-gray-500 mt-1">Status: Active</div>
+                        </div>
+                    </div>
+                </div>
+                {{else}}
+                <div class="col-span-full py-12 text-center text-gray-400">
+                    <svg class="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path></svg>
+                    <p>No services detected yet in the topology graph.</p>
+                </div>
+                {{end}}
+            </div>
+            
+            {{if .Edges}}
+            <div class="mt-8 pt-6 border-t border-gray-100">
+                <h5 class="text-sm font-medium text-gray-500 mb-4">Connections</h5>
+                <ul class="space-y-2 text-sm text-gray-600">
+                    {{range .Edges}}
+                    <li class="flex items-center gap-2">
+                        <span class="font-medium text-slate-700 bg-slate-100 px-2 py-1 rounded">{{.Source}}</span>
+                        <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
+                        <span class="font-medium text-slate-700 bg-slate-100 px-2 py-1 rounded">{{.Target}}</span>
+                    </li>
+                    {{end}}
+                </ul>
+            </div>
+            {{end}}
+        </div>
+    </div>
+</div>
+
+{{template "footer" .}}

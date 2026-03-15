@@ -27,7 +27,7 @@ import (
 	"github.com/RandomCodeSpace/argus/internal/telemetry"
 	"github.com/RandomCodeSpace/argus/internal/tsdb"
 	"github.com/RandomCodeSpace/argus/internal/vectordb"
-	"github.com/RandomCodeSpace/argus/web"
+	"github.com/RandomCodeSpace/argus/internal/ui"
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	colmetricspb "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
@@ -320,42 +320,11 @@ func main() {
 		slog.Info("🤖 MCP endpoint registered", "path", mcpPath)
 	}
 
-	// SPA Handler
-	distFS, err := web.DistFS()
-	if err != nil {
-		log.Fatalf("Failed to load embedded frontend: %v", err)
+	// Embedded UI Server
+	uiServer := ui.NewServer(repo, metrics, svcGraph, vectorIdx)
+	if err := uiServer.RegisterRoutes(mux); err != nil {
+		log.Fatalf("Failed to register UI routes: %v", err)
 	}
-	fileServer := http.FileServer(http.FS(distFS))
-
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-		if path == "/" {
-			path = "index.html"
-		} else if path[0] == '/' {
-			path = path[1:]
-		}
-
-		f, err := distFS.Open(path)
-		if err == nil {
-			f.Close()
-			fileServer.ServeHTTP(w, r)
-			return
-		}
-
-		// SPA catch-all → serve index.html
-		f, err = distFS.Open("index.html")
-		if err != nil {
-			http.Error(w, "index.html not found", http.StatusInternalServerError)
-			return
-		}
-		defer f.Close()
-
-		stat, _ := f.Stat()
-		http.ServeContent(w, r, "index.html", stat.ModTime(), f.(interface {
-			Read(p []byte) (n int, err error)
-			Seek(offset int64, whence int) (int64, error)
-		}))
-	})
 
 	var httpHandler http.Handler = api.MetricsMiddleware(metrics, mux)
 	if cfg.APIRateLimitRPS > 0 {
@@ -395,7 +364,6 @@ func main() {
 	// 2. Stop processing engines (order: Hubs -> AI -> TSDB)
 	aiService.Stop()
 	tsdbAgg.Stop()
-	eventHub.Stop() // Note: New Stop() method should be called if implemented, otherwise context handles it
 
 	slog.Info("✅ ARGUS V5.4 shutdown complete")
 }

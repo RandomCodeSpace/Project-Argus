@@ -1,0 +1,60 @@
+{{template "header" .}}
+
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h3 class="text-sm font-medium text-gray-500 mb-1">Total Logs</h3>
+        <p class="text-3xl font-bold text-slate-800">{{.Stats.LogCount}}</p>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h3 class="text-sm font-medium text-gray-500 mb-1">Total Traces</h3>
+        <p class="text-3xl font-bold text-slate-800">{{.Stats.TraceCount}}</p>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h3 class="text-sm font-medium text-gray-500 mb-1">Services Tracked</h3>
+        <p class="text-3xl font-bold text-slate-800">{{.Stats.ServiceCount}}</p>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+        <h3 class="text-sm font-medium text-gray-500 mb-1">Database Size</h3>
+        <p class="text-3xl font-bold text-slate-800">{{.Stats.DBSizeMB}} MB</p>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+    <!-- Active Services snippet -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100">
+        <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center">
+            <h3 class="font-semibold text-gray-800">Quick Actions</h3>
+        </div>
+        <div class="p-6">
+            <p class="text-sm text-gray-600 mb-6">Explore the full capabilities of your observability pipeline.</p>
+            <div class="grid gap-3">
+                <a href="/logs" class="flex items-center justify-between p-3 rounded-lg border border-gray-100 hover:border-slate-300 hover:bg-slate-50 transition-colors">
+                    <span class="font-medium text-slate-800">Search Logs</span>
+                    <span class="text-blue-600">&rarr;</span>
+                </a>
+                <a href="/traces" class="flex items-center justify-between p-3 rounded-lg border border-gray-100 hover:border-slate-300 hover:bg-slate-50 transition-colors">
+                    <span class="font-medium text-slate-800">Analyze Traces</span>
+                    <span class="text-blue-600">&rarr;</span>
+                </a>
+                <a href="/services" class="flex items-center justify-between p-3 rounded-lg border border-gray-100 hover:border-slate-300 hover:bg-slate-50 transition-colors">
+                    <span class="font-medium text-slate-800">View Service Topologies</span>
+                    <span class="text-blue-600">&rarr;</span>
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Info -->
+    <div class="bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl shadow-sm p-8 text-white">
+        <h3 class="text-xl font-bold mb-3">Argus MCP</h3>
+        <p class="text-slate-300 text-sm leading-relaxed mb-6">
+            Argus exposes telemetry data directly to Language Models through the Model Context Protocol (MCP).
+            This embedded interface provides a lightweight human-friendly view of exactly what your AI agents can see.
+        </p>
+        <div class="bg-slate-950/50 rounded-lg p-4 font-mono text-sm text-slate-300 break-all">
+            Connect your MCP client to stdio for full LLM integration!
+        </div>
+    </div>
+</div>
+
+{{template "footer" .}}

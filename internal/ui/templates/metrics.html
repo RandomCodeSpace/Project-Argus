@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Argus - Metrics</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <nav>
+        <a href="/">Dashboard</a> | <a href="/logs">Logs</a> | <a href="/storage">Storage</a> | <a href="/metrics">Metrics</a>
+    </nav>
+    <h1>Metrics Analysis</h1>
+    <div class="card">
+        <h3>Current Status</h3>
+        <p>Ingestion Rate: {{.Metrics.IngestRate}}/s</p>
+        <p>Cardinality: {{.Metrics.Cardinality}}</p>
+    </div>
+    <h3>Top Labels</h3>
+    <ul>
+        {{range .Metrics.TopLabels}}
+        <li>{{.Name}}: {{.Count}}</li>
+        {{end}}
+    </ul>
+</body>
+</html>

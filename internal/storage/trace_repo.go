@@ -184,7 +184,7 @@ func (r *Repository) GetServiceMapMetrics(start, end time.Time) (*ServiceMapMetr
 	query := r.db.Model(&Span{})
 
 	if !start.IsZero() && !end.IsZero() {
-		query = query.Where("start_time BETWEEN ? AND ?", start, end)
+		query = query.Where("timestamp BETWEEN ? AND ?", start, end)
 	}
 
 	if err := query.Find(&spans).Error; err != nil {

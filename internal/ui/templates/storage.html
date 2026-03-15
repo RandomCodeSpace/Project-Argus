@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Argus - Storage</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <nav>
+        <a href="/">Dashboard</a> | <a href="/logs">Logs</a> | <a href="/storage">Storage</a> | <a href="/metrics">Metrics</a>
+    </nav>
+    <h1>Storage Overview</h1>
+    <div class="card">
+        <h3>Repository Stats</h3>
+        <p>Active Chunks: {{.RepoStats.Chunks}}</p>
+        <p>Total Bytes (hot): {{.RepoStats.TotalBytes}}</p>
+        <p>Retention: {{.RepoStats.Retention}}</p>
+    </div>
+    <div class="card">
+        <h3>Vector Index</h3>
+        <p>Entries: {{.VectorEntries}}</p>
+    </div>
+</body>
+</html>

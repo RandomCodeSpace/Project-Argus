@@ -99,3 +99,34 @@ func (r *Repository) VacuumDB() error {
 func (r *Repository) DB() *gorm.DB {
 	return r.db
 }
+
+// RecentTraces returns the most recent traces.
+func (r *Repository) RecentTraces(limit int) ([]Trace, error) {
+	var traces []Trace
+	if err := r.db.Order("timestamp desc").Limit(limit).Find(&traces).Error; err != nil {
+		return nil, err
+	}
+	return traces, nil
+}
+
+// RecentLogs returns the most recent logs.
+func (r *Repository) RecentLogs(limit int) ([]Log, error) {
+	var logs []Log
+	if err := r.db.Order("timestamp desc").Limit(limit).Find(&logs).Error; err != nil {
+		return nil, err
+	}
+	return logs, nil
+}
+
+// SearchLogs searches for logs based on query.
+func (r *Repository) SearchLogs(query string, limit int) ([]Log, error) {
+	var logs []Log
+	db := r.db.Order("timestamp desc").Limit(limit)
+	if query != "" {
+		db = db.Where("body LIKE ? OR service_name LIKE ?", "%"+query+"%", "%"+query+"%")
+	}
+	if err := db.Find(&logs).Error; err != nil {
+		return nil, err
+	}
+	return logs, nil
+}
