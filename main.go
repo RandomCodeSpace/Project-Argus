@@ -11,10 +11,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/RandomCodeSpace/central-ops/pkg/version"
 
 	"github.com/RandomCodeSpace/argus/internal/ai"
 	"github.com/RandomCodeSpace/argus/internal/api"
@@ -40,16 +41,9 @@ import (
 )
 
 
-// Version defaults to "local" for development builds.
-// When installed via `go install module@vX.Y.Z`, the module version is read
-// automatically from build info — no ldflags required.
-var Version = func() string {
-	if info, ok := debug.ReadBuildInfo(); ok &&
-		info.Main.Version != "" && info.Main.Version != "(devel)" {
-		return info.Main.Version
-	}
-	return "local"
-}()
+// Version is detected from build info at startup.
+// Returns the real tag when installed via `go install`, "local" otherwise.
+var Version = version.Detect()
 
 func main() {
 	versionFlag := flag.Bool("version", false, "print version and exit")

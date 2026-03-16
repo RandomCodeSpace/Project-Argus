@@ -13,6 +13,7 @@ import (
 	"github.com/RandomCodeSpace/argus/internal/storage"
 	"github.com/RandomCodeSpace/argus/internal/telemetry"
 	"github.com/RandomCodeSpace/argus/internal/vectordb"
+	"github.com/RandomCodeSpace/central-ops/pkg/httputil"
 )
 
 const (
@@ -47,22 +48,15 @@ func New(
 	}
 }
 
-// Handler returns an http.Handler for the MCP server.
+// Handler returns an http.Handler for the MCP server with CORS applied.
 // Works correctly when mounted with http.StripPrefix.
 func (s *Server) Handler() http.Handler {
-	return http.HandlerFunc(s.ServeHTTP)
+	return httputil.CORSMiddleware("*", http.HandlerFunc(s.ServeHTTP))
 }
 
 // ServeHTTP dispatches by HTTP method — no path routing needed.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// CORS headers on every response
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Mcp-Session-Id, Accept")
-
 	switch r.Method {
-	case http.MethodOptions:
-		w.WriteHeader(http.StatusNoContent)
 	case http.MethodPost:
 		s.handleRPC(w, r)
 	case http.MethodGet:
