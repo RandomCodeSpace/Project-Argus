@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., v1.0.0)'
+        description: 'Base beta version to release (e.g., v0.0.5-beta). Auto-increments (v0.0.5-beta.1, .2, …) will resume from this base on the next push to main.'
         required: true
 
 jobs:
@@ -29,4 +29,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.version }}
+          prerelease: false
           generate_release_notes: true
