@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   pipeline:
-    uses: RandomCodeSpace/central-ops/.github/workflows/reusable-pipeline.yml@main
+    uses: RandomCodeSpace/central-ops/reusable-pipeline.yml@main
     secrets: inherit
     with:
       go_version_file: go.mod
