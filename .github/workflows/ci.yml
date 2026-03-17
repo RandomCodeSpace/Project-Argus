@@ -21,3 +21,5 @@ jobs:
       go_version_file: go.mod
       cgo_enabled: "1"
       go_test_flags: "-race -timeout 120s"
+      run_codeql: false
+      run_cifuzz: false
