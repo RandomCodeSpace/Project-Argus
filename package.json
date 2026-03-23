@@ -1,0 +1,27 @@
+{
+  "name": "otelcontext",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "test": "bun test src/tests/",
+    "build": "bun build src/index.ts --outdir dist --target bun"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^25.5.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.3",
+    "@grpc/proto-loader": "^0.8.0",
+    "@modelcontextprotocol/sdk": "^1.27.1",
+    "drizzle-orm": "^0.45.1",
+    "fflate": "^0.8.2",
+    "hono": "^4.12.8",
+    "prom-client": "^15.1.3"
+  }
+}
