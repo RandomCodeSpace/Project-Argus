@@ -127,3 +127,13 @@ go.work.sum
 *scheduled_tasks*
 tmp/
 data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+*.egg
+.pytest_cache/
+otelcontext.db
